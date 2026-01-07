@@ -1,0 +1,182 @@
+{
+  "groups": [
+    {
+      "id": "1fde8069-7c11-4ad3-b933-a8b3a93064ec",
+      "name": "GRup1",
+      "description": "GRup1",
+      "createdAt": "2025-12-22T14:13:16.8391455Z",
+      "updatedAt": "2025-12-22T14:13:16.8392666Z"
+    },
+    {
+      "id": "9c846f11-f073-487c-bbcd-72480528d258",
+      "name": "GRup2",
+      "description": "GRup2",
+      "createdAt": "2025-12-22T14:23:21.9104761Z",
+      "updatedAt": "2025-12-22T14:23:21.9104771Z"
+    },
+    {
+      "id": "8c543b7e-f191-4637-98b6-8cb1c26b1147",
+      "name": "Grup3",
+      "description": "Grup3",
+      "createdAt": "2025-12-23T07:14:16.8470212Z",
+      "updatedAt": "2025-12-23T07:14:16.8470216Z"
+    }
+  ],
+  "taskItems": [
+    {
+      "id": "eff6c694-47a8-4e60-8fcd-eb019a844c45",
+      "name": "Task1",
+      "description": "Task1Task1Task1Task1",
+      "retryIntervalMinutes": 60,
+      "status": 4,
+      "startTime": "2025-12-23T08:14:05.2704768Z",
+      "endTime": "2025-12-23T08:15:20.2785114Z",
+      "lastErrorTime": null,
+      "retryDelayMinutes": 3,
+      "progress": 100,
+      "errorMessage": null,
+      "createdAt": "2025-12-22T14:13:39.1642406Z",
+      "updatedAt": "2025-12-23T08:15:20.2794168Z"
+    },
+    {
+      "id": "ea1e5574-2607-4ffb-9ad8-c14fe17b51ba",
+      "name": "Task2",
+      "description": "Task1-\u003ETask2",
+      "retryIntervalMinutes": 60,
+      "status": 4,
+      "startTime": "2025-12-23T08:15:24.5432148Z",
+      "endTime": "2025-12-23T08:17:34.8392208Z",
+      "lastErrorTime": null,
+      "retryDelayMinutes": 3,
+      "progress": 100,
+      "errorMessage": null,
+      "createdAt": "2025-12-22T14:14:00.3647822Z",
+      "updatedAt": "2025-12-23T08:17:34.8402866Z"
+    },
+    {
+      "id": "a41094a3-07cf-4203-91ee-a1716d9f73e4",
+      "name": "Task3",
+      "description": "Task3Task3Task3Task3Task3",
+      "retryIntervalMinutes": 60,
+      "status": 0,
+      "startTime": null,
+      "endTime": null,
+      "lastErrorTime": null,
+      "retryDelayMinutes": 605,
+      "progress": 0,
+      "errorMessage": null,
+      "createdAt": "2025-12-22T14:32:58.0635221Z",
+      "updatedAt": "2025-12-23T07:15:23.7235147Z"
+    },
+    {
+      "id": "7fb10eb1-7aaa-4d57-8042-e4f7b19d0479",
+      "name": "Task4",
+      "description": "Task4",
+      "retryIntervalMinutes": 1,
+      "status": 4,
+      "startTime": "2025-12-23T08:14:01.0121099Z",
+      "endTime": "2025-12-23T08:14:02.2803381Z",
+      "lastErrorTime": null,
+      "retryDelayMinutes": 60,
+      "progress": 100,
+      "errorMessage": null,
+      "createdAt": "2025-12-23T07:13:59.2746065Z",
+      "updatedAt": "2025-12-23T08:14:02.2814547Z"
+    }
+  ],
+  "groupTaskAssignments": [
+    {
+      "id": "da9e3431-e6a7-49d8-b5cd-c763157e36df",
+      "groupId": "1fde8069-7c11-4ad3-b933-a8b3a93064ec",
+      "taskItemId": "eff6c694-47a8-4e60-8fcd-eb019a844c45",
+      "order": 0,
+      "prerequisiteTaskItemIds": [],
+      "createdAt": "2025-12-22T14:48:05.8775316Z",
+      "updatedAt": "2025-12-22T14:48:05.8776976Z"
+    },
+    {
+      "id": "15948e08-378d-4b4b-89da-f2ea1c3719ec",
+      "groupId": "1fde8069-7c11-4ad3-b933-a8b3a93064ec",
+      "taskItemId": "ea1e5574-2607-4ffb-9ad8-c14fe17b51ba",
+      "order": 1,
+      "prerequisiteTaskItemIds": [
+        "eff6c694-47a8-4e60-8fcd-eb019a844c45"
+      ],
+      "createdAt": "2025-12-22T14:48:08.1523236Z",
+      "updatedAt": "2025-12-23T08:13:33.5423638Z"
+    },
+    {
+      "id": "4505a2c8-09e3-4145-a6fb-f71bb513cee6",
+      "groupId": "1fde8069-7c11-4ad3-b933-a8b3a93064ec",
+      "taskItemId": "a41094a3-07cf-4203-91ee-a1716d9f73e4",
+      "order": 2,
+      "prerequisiteTaskItemIds": [
+        "ea1e5574-2607-4ffb-9ad8-c14fe17b51ba"
+      ],
+      "createdAt": "2025-12-22T14:48:10.0940554Z",
+      "updatedAt": "2025-12-23T08:13:35.1468105Z"
+    },
+    {
+      "id": "1128b8cb-f070-42cf-a82f-8bd621bf6f6c",
+      "groupId": "9c846f11-f073-487c-bbcd-72480528d258",
+      "taskItemId": "ea1e5574-2607-4ffb-9ad8-c14fe17b51ba",
+      "order": 0,
+      "prerequisiteTaskItemIds": [],
+      "createdAt": "2025-12-22T14:55:44.2297303Z",
+      "updatedAt": "2025-12-22T14:55:44.2297308Z"
+    },
+    {
+      "id": "67fccdcc-5d92-4caf-bbb5-0e02829ae5af",
+      "groupId": "9c846f11-f073-487c-bbcd-72480528d258",
+      "taskItemId": "a41094a3-07cf-4203-91ee-a1716d9f73e4",
+      "order": 1,
+      "prerequisiteTaskItemIds": [],
+      "createdAt": "2025-12-22T14:55:47.6247871Z",
+      "updatedAt": "2025-12-22T14:55:50.6338595Z"
+    },
+    {
+      "id": "41cddf7e-657f-4005-ab4f-b727ad3dbcd3",
+      "groupId": "8c543b7e-f191-4637-98b6-8cb1c26b1147",
+      "taskItemId": "7fb10eb1-7aaa-4d57-8042-e4f7b19d0479",
+      "order": 0,
+      "prerequisiteTaskItemIds": [],
+      "createdAt": "2025-12-23T07:14:21.2478963Z",
+      "updatedAt": "2025-12-23T07:14:21.2478966Z"
+    },
+    {
+      "id": "ac77c748-eef3-414c-b622-950a8b9e960c",
+      "groupId": "8c543b7e-f191-4637-98b6-8cb1c26b1147",
+      "taskItemId": "a41094a3-07cf-4203-91ee-a1716d9f73e4",
+      "order": 1,
+      "prerequisiteTaskItemIds": [
+        "7fb10eb1-7aaa-4d57-8042-e4f7b19d0479"
+      ],
+      "createdAt": "2025-12-23T07:14:34.7268895Z",
+      "updatedAt": "2025-12-23T07:14:37.9665501Z"
+    }
+  ],
+  "groupSchedules": [
+    {
+      "id": "",
+      "groupId": "1fde8069-7c11-4ad3-b933-a8b3a93064ec",
+      "workPeriod": 0,
+      "startTime": "10:12:00",
+      "restartOnError": false,
+      "isActive": true,
+      "lastRunTime": "2025-12-23T08:14:05.1991558Z",
+      "createdAt": "2025-12-22T14:48:36.0059292Z",
+      "updatedAt": "2025-12-23T08:14:05.2981258Z"
+    },
+    {
+      "id": "",
+      "groupId": "8c543b7e-f191-4637-98b6-8cb1c26b1147",
+      "workPeriod": 0,
+      "startTime": "10:15:00",
+      "restartOnError": false,
+      "isActive": true,
+      "lastRunTime": "2025-12-23T07:15:23.7159665Z",
+      "createdAt": "2025-12-23T07:14:53.403423Z",
+      "updatedAt": "2025-12-23T07:15:23.7700185Z"
+    }
+  ]
+}

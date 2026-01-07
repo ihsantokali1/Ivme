@@ -1,0 +1,20 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Speedometer/Clock Icon with speed lines -->
+  <!-- Outer thick ring -->
+  <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="3" fill="none"/>
+  <!-- Inner thin ring -->
+  <circle cx="24" cy="24" r="14" stroke="currentColor" stroke-width="2" fill="none"/>
+  <!-- Center solid dot -->
+  <circle cx="24" cy="24" r="3" fill="currentColor"/>
+  <!-- Needle pointing to 1 o'clock position -->
+  <line x1="24" y1="24" x2="30" y2="12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <!-- Mark on outer ring above needle -->
+  <line x1="30" y1="4" x2="30" y2="8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <!-- Speed lines on the left (5 lines, tapered, varying lengths) -->
+  <line x1="4" y1="24" x2="6" y2="24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="4" y1="22" x2="7" y2="22" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="4" y1="20" x2="10" y2="20" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="4" y1="18" x2="7" y2="18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="4" y1="16" x2="6" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
+
