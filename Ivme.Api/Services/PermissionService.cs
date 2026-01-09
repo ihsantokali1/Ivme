@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Ivme.Api.Data;
 using Ivme.Api.Models;
 
@@ -96,30 +96,53 @@ public class PermissionService : IPermissionService
             return;
         }
 
-        // Eğer zaten yetkiler varsa, tekrar ekleme
-        if (await _dbContext.RolePermissions.AnyAsync())
-        {
-            return;
-        }
-
-        // Sadece Admin ve User rolleri için varsayılan yetkileri oluştur
+        // Sadece Admin ve User rolleri için varsayılan yetkileri oluştur (eksik olanları ekle)
         var defaultRoles = new[] { "Admin", "User" };
         foreach (var roleName in defaultRoles)
         {
-            var permissions = GetDefaultPermissions(roleName);
-            foreach (var permission in permissions)
+            var defaultPermissions = GetDefaultPermissions(roleName);
+            
+            // Mevcut yetkileri al
+            var existingPermissions = await _dbContext.RolePermissions
+                .Where(rp => rp.Role == roleName)
+                .Select(rp => rp.Permission)
+                .ToListAsync();
+                
+            // Eksik olanları ekle
+            foreach (var permission in defaultPermissions)
             {
-                _dbContext.RolePermissions.Add(new RolePermission
+                if (!existingPermissions.Contains(permission))
                 {
-                    Role = roleName,
-                    Permission = permission,
-                    CreatedAt = DateTime.Now,
-                    UpdatedAt = DateTime.Now
-                });
+                    _dbContext.RolePermissions.Add(new RolePermission
+                    {
+                        Role = roleName,
+                        Permission = permission,
+                        CreatedAt = DateTime.Now,
+                        UpdatedAt = DateTime.Now
+                    });
+                }
             }
         }
 
         await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task<bool> HasPermissionAsync(string? username, string permission)
+    {
+        if (string.IsNullOrEmpty(username)) return false;
+
+        if (!_dbConfig.UseDatabase || _dbContext == null)
+        {
+            // Database yoksa, username "admin" ise Admin rolü, değilse User rolü varsayalım (basitleştirilmiş)
+            // Gerçek senaryoda user servisine gidip rolü almak gerekebilir ama burada db yoksa zaten user da yok
+            return false;
+        }
+
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Username == username);
+        if (user == null) return false;
+
+        var rolePermissions = await GetPermissionsByRoleAsync(user.Role);
+        return rolePermissions.Contains(permission);
     }
 
     private List<string> GetDefaultPermissions(string role)
@@ -128,20 +151,24 @@ public class PermissionService : IPermissionService
         {
             "Admin" => new List<string>
             {
+                "pages.dashboard.view",
                 "pages.tasks.view", "pages.tasks.create", "pages.tasks.update", "pages.tasks.delete",
                 "pages.groups.view", "pages.groups.create", "pages.groups.update", "pages.groups.delete",
                 "pages.configuration.view", "pages.configuration.update",
                 "pages.schedule.view", "pages.schedule.update",
                 "pages.management.view", "pages.history.view", "pages.tv.view",
                 "pages.users.view", "pages.users.create", "pages.users.update", "pages.users.delete",
+                "pages.flow.view", "pages.flow.create", "pages.flow.update", "pages.flow.delete",
                 "actions.task.start", "actions.task.stop", "actions.task.pause", "actions.task.resume",
                 "actions.task.complete", "actions.task.markAsSuccess", "actions.task.fail", "actions.task.restart",
                 "actions.group.start", "actions.group.stop"
             },
             "User" => new List<string>
             {
+                "pages.dashboard.view",
                 "pages.tasks.view", "pages.groups.view", "pages.configuration.view",
                 "pages.schedule.view", "pages.management.view", "pages.history.view", "pages.tv.view",
+                "pages.flow.view",
                 "actions.task.start", "actions.task.stop", "actions.task.pause", "actions.task.resume",
                 "actions.task.complete", "actions.task.markAsSuccess", "actions.task.fail", "actions.task.restart",
                 "actions.group.start", "actions.group.stop"

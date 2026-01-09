@@ -16,8 +16,9 @@ public interface ITaskManagementService
     Task UpdateTaskItemProgressAsync(string taskItemId, int progress, string? groupId = null);
     Task CheckAndUpdateTaskItemStatusesAsync();
     Task<List<TaskItem>> GetReadyTaskItemsAsync();
-    Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual");
-    Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual");
+    Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null);
+    Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual", string? flowExecutionId = null);
+    Task<bool> StartFlowAsync(string flowItemId, string triggeredBy = "Manual");
     Task<bool> RestartTaskItemAsync(string taskItemId, string? groupId = null, string? triggeredBy = null);
     Task CheckAndTriggerScheduledGroupsAsync();
 }

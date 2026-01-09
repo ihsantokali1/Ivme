@@ -11,8 +11,15 @@ public interface IExecutionHistoryService
     Task SetTaskRetryStartTimeAsync(string executionId, DateTime retryStartTime);
     Task UpdateTaskExecutionStatusAsync(string executionId, TaskItemStatus status);
     
-    Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual");
+    Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null);
     Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors);
+    
+    // Flow Execution
+    Task<FlowExecutionHistory> StartFlowExecutionAsync(string flowItemId, string triggeredBy = "Manual");
+    Task CompleteFlowExecutionAsync(string executionId, string status = "Completed");
+    Task<FlowExecutionHistory?> GetActiveFlowExecutionAsync(string flowItemId);
+    Task<FlowExecutionHistory?> GetFlowExecutionHistoryAsync(string executionId);
+    Task<List<FlowExecutionHistory>> GetFlowExecutionHistoriesAsync(string? flowItemId = null, DateTime? startDate = null, DateTime? endDate = null);
     
     Task<List<TaskExecutionHistory>> GetTaskExecutionHistoriesAsync(string? taskItemId = null, string? groupId = null, DateTime? startDate = null, DateTime? endDate = null);
     Task<List<GroupExecutionHistory>> GetGroupExecutionHistoriesAsync(string? groupId = null, DateTime? startDate = null, DateTime? endDate = null);

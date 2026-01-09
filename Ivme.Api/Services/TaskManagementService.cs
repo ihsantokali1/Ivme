@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
 using Microsoft.Data.SqlClient;
+using System.Collections.Concurrent;
 using Ivme.Api.Data;
 
 namespace Ivme.Api.Services;
@@ -13,6 +14,7 @@ public class TaskManagementService : ITaskManagementService
     private readonly DatabaseConfig _dbConfig;
     private readonly TaskDbContext? _dbContext;
     private readonly IServiceScopeFactory? _serviceScopeFactory;
+    private static readonly ConcurrentDictionary<string, byte> _processingTaskIds = new(); // Concurrency control
 
     public TaskManagementService(
         ITaskDataService dataService, 
@@ -933,7 +935,8 @@ public class TaskManagementService : ITaskManagementService
                 {
                     // ÖNEMLİ: executionToMark farklı bir DbContext'ten geliyor olabilir
                     // Bu yüzden ID'yi kullanarak yeni bir query yapalım veya doğrudan güncelleyelim
-                    var dbContext = historyService.GetDbContextPublic();
+                    var historyServiceImpl = _executionHistoryService as ExecutionHistoryService;
+                    var dbContext = historyServiceImpl?.GetDbContextPublic();
                     if (dbContext != null)
                     {
                         // Execution'ı tekrar bul (aynı context'te)
@@ -1289,6 +1292,20 @@ public class TaskManagementService : ITaskManagementService
             
             var group = data.Groups.FirstOrDefault(g => g.Id == assignment.GroupId);
             
+            // Running durumundaki task'ları kontrol et (Timeout)
+            if (assignment.Status == TaskItemStatus.Running && assignment.StartTime.HasValue)
+            {
+                var timeoutMinutes = taskItem.TimeoutMinutes > 0 ? taskItem.TimeoutMinutes : 720;
+                var runningTime = DateTime.UtcNow - assignment.StartTime.Value;
+                
+                if (runningTime.TotalMinutes > timeoutMinutes)
+                {
+                    Console.WriteLine($"[Timeout] Task {taskItem.Name} ({taskItem.Id}) timed out after {runningTime.TotalMinutes:F1} mins (Limit: {timeoutMinutes} mins).");
+                    await FailTaskItemAsync(taskItem.Id, $"Task timed out after {runningTime.TotalMinutes:F1} minutes.", assignment.GroupId);
+                    continue;
+                }
+            }
+
             // Failed durumundaki task'ları kontrol et ve retry süresi geçmişse WaitingRetry'ye geçir
             if (assignment.Status == TaskItemStatus.Failed)
             {
@@ -1352,6 +1369,12 @@ public class TaskManagementService : ITaskManagementService
             // WaitingRetry durumundaki task itemlar Ready durumuna geçebilir
             if (assignment.Status == TaskItemStatus.WaitingRetry)
             {
+                // Concurrency check: Eğer bu task zaten işleniyorsa atla
+                if (_processingTaskIds.ContainsKey(taskItem.Id))
+                {
+                    continue;
+                }
+
                 // RetryCount kontrolü: Önceki execution'ın RetryCount'unu kontrol et
                 var historyService3 = _executionHistoryService as ExecutionHistoryService;
                 int previousRetryCount = 0;
@@ -1399,7 +1422,17 @@ public class TaskManagementService : ITaskManagementService
                     // triggeredBy null geçiliyor, böylece StartTaskItemAsync içinde group execution'dan TriggeredBy alınır
                     try
                     {
-                        await StartTaskItemAsync(taskItem.Id, assignment.GroupId, skipCanStartCheck: true, triggeredBy: null);
+                        if (_processingTaskIds.TryAdd(taskItem.Id, 0))
+                        {
+                            try
+                            {
+                                await StartTaskItemAsync(taskItem.Id, assignment.GroupId, skipCanStartCheck: true, triggeredBy: null);
+                            }
+                            finally
+                            {
+                                _processingTaskIds.TryRemove(taskItem.Id, out _);
+                            }
+                        }
                     }
                     catch
                     {
@@ -1474,7 +1507,8 @@ public class TaskManagementService : ITaskManagementService
             bool allPrerequisitesCompleted = true;
             int checkedPrerequisitesCount = 0;
             
-            foreach (var prerequisiteId in assignment.PrerequisiteTaskItemIds)
+            var prereqIds = assignment.PrerequisiteTaskItemIds ?? new List<string>();
+            foreach (var prerequisiteId in prereqIds)
             {
                 // ÖNEMLİ: Her önşart kontrolünde güncel verileri al (cache'lenmiş data yerine)
                 var currentData = await _dataService.GetDataAsync();
@@ -1510,11 +1544,28 @@ public class TaskManagementService : ITaskManagementService
             // Tüm önşartlar tamamlandıysa task'ı başlat
             if (allPrerequisitesCompleted)
             {
+                // Concurrency check
+                if (_processingTaskIds.ContainsKey(taskItem.Id))
+                {
+                    continue;
+                }
+
                 var group = data.Groups.FirstOrDefault(g => g.Id == assignment.GroupId);
                 Console.WriteLine($"[CheckAndUpdateTaskItemStatusesAsync] Found ready task (prerequisites completed): TaskId={taskItem.Id}, TaskName={taskItem.Name}, GroupId={assignment.GroupId}, GroupName={group?.Name ?? "Unknown"}");
                 // triggeredBy null geçiliyor, böylece StartTaskItemAsync içinde group execution'dan TriggeredBy alınır
-                await StartTaskItemAsync(taskItem.Id, assignment.GroupId, triggeredBy: null);
-                Console.WriteLine($"[CheckAndUpdateTaskItemStatusesAsync] Started ready task: TaskId={taskItem.Id}, TaskName={taskItem.Name}, GroupId={assignment.GroupId}");
+                
+                if (_processingTaskIds.TryAdd(taskItem.Id, 0))
+                {
+                    try
+                    {
+                        await StartTaskItemAsync(taskItem.Id, assignment.GroupId, triggeredBy: null);
+                        Console.WriteLine($"[CheckAndUpdateTaskItemStatusesAsync] Started ready task: TaskId={taskItem.Id}, TaskName={taskItem.Name}, GroupId={assignment.GroupId}");
+                    }
+                    finally
+                    {
+                        _processingTaskIds.TryRemove(taskItem.Id, out _);
+                    }
+                }
             }
         }
         
@@ -1613,27 +1664,33 @@ public class TaskManagementService : ITaskManagementService
                             if (assignment.Status == TaskItemStatus.Failed)
                             {
                                 var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                if (taskItem != null && taskItem.RetryIntervalMinutes > 0)
+                                if (taskItem != null)
                                 {
-                                    // TaskExecutionHistory'den RetryCount'u kontrol et
-                                    TaskExecutionHistory? failedExecution = null;
+                                    // RetryDelayMinutes veya RetryIntervalMinutes kontrolü
+                                    var retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
                                     
-                                    if (dbContext != null)
+                                    if (retryDelay > 0)
                                     {
-                                        failedExecution = await dbContext.TaskExecutionHistories
-                                            .Where(e => e.TaskItemId == assignment.TaskItemId && 
-                                                       e.GroupId == group.Id && 
-                                                       e.StartTime.Date == today &&
-                                                       e.GroupExecutionId == activeGroupExecution.Id &&
-                                                       e.FinalStatus == TaskItemStatus.Failed)
-                                            .OrderByDescending(e => e.StartTime)
-                                            .FirstOrDefaultAsync();
-                                    }
-                                    
-                                    if (failedExecution != null && failedExecution.RetryCount < 3)
-                                    {
-                                        hasWaitingRetryTasks = true;
-                                        continue; // Bu task'ı tamamlanmış sayma
+                                        // TaskExecutionHistory'den RetryCount'u kontrol et
+                                        TaskExecutionHistory? failedExecution = null;
+                                        
+                                        if (dbContext != null)
+                                        {
+                                            failedExecution = await dbContext.TaskExecutionHistories
+                                                .Where(e => e.TaskItemId == assignment.TaskItemId && 
+                                                           e.GroupId == group.Id && 
+                                                           e.StartTime.Date == today &&
+                                                           e.GroupExecutionId == activeGroupExecution.Id &&
+                                                           e.FinalStatus == TaskItemStatus.Failed)
+                                                .OrderByDescending(e => e.StartTime)
+                                                .FirstOrDefaultAsync();
+                                        }
+                                        
+                                        if (failedExecution != null && failedExecution.RetryCount < 3)
+                                        {
+                                            hasWaitingRetryTasks = true;
+                                            continue; // Bu task'ı tamamlanmış sayma
+                                        }
                                     }
                                 }
                             }
@@ -1670,14 +1727,36 @@ public class TaskManagementService : ITaskManagementService
                             if (assignment.Status == TaskItemStatus.Failed)
                             {
                                 var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                if (taskItem != null && taskItem.RetryIntervalMinutes > 0)
+                                Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {assignment.TaskItemId} Status=Failed. Checking Retry...");
+                                
+                                if (taskItem != null)
                                 {
-                                    // TaskExecutionHistory'den RetryCount'u kontrol et
-                                    if (todayExecution != null && todayExecution.RetryCount < 3)
+                                    // RetryDelayMinutes veya RetryIntervalMinutes kontrolü
+                                    var retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
+                                    Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {taskItem.Name}: RetryInterval={taskItem.RetryIntervalMinutes}, RetryDelay={taskItem.RetryDelayMinutes}, EffectiveDelay={retryDelay}");
+
+                                    if (retryDelay > 0)
                                     {
-                                        hasWaitingRetryTasks = true;
-                                        Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {assignment.TaskItemId} in group {group.Id} has assignment.Status=Failed with RetryCount={todayExecution.RetryCount}, group execution cannot be completed yet");
-                                        continue; // Bu task'ı tamamlanmış sayma
+                                        // TaskExecutionHistory'den RetryCount'u kontrol et
+                                        if (todayExecution != null)
+                                        {
+                                            Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {taskItem.Name}: TodayExecution found. RetryCount={todayExecution.RetryCount}, FinalStatus={todayExecution.FinalStatus}");
+                                            
+                                            if (todayExecution.RetryCount < 3)
+                                            {
+                                                hasWaitingRetryTasks = true;
+                                                Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {assignment.TaskItemId} in group {group.Id} has assignment.Status=Failed with RetryCount={todayExecution.RetryCount}, group execution cannot be completed yet");
+                                                continue; // Bu task'ı tamamlanmış sayma
+                                            }
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {taskItem.Name}: TodayExecution NOT found in history search.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {taskItem.Name} has NO retry delay configured (EffectiveDelay=0).");
                                     }
                                 }
                             }
@@ -1696,7 +1775,16 @@ public class TaskManagementService : ITaskManagementService
                                     else if (todayExecution.FinalStatus == TaskItemStatus.Failed)
                                     {
                                         // RetryCount kontrolü: Eğer < 3 ise, henüz retry yapılabilir
-                                        if (todayExecution.RetryCount < 3)
+                                        // RetryCount kontrolü: Eğer < 3 ise, henüz retry yapılabilir
+                                        // ANCAK: RetryDelayMinutes veya RetryIntervalMinutes > 0 olmalı
+                                        var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
+                                        var retryDelay = 0;
+                                        if (taskItem != null)
+                                        {
+                                            retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
+                                        }
+
+                                        if (todayExecution.RetryCount < 3 && retryDelay > 0)
                                         {
                                             hasWaitingRetryTasks = true;
                                         }
@@ -1737,7 +1825,14 @@ public class TaskManagementService : ITaskManagementService
                                 {
                                     // Failed durumunda ama execution history yoksa, en son execution'ı kontrol et
                                     var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                    if (taskItem != null && taskItem.RetryIntervalMinutes > 0 && dbContext != null)
+                                    
+                                    var retryDelay = 0;
+                                    if (taskItem != null)
+                                    {
+                                        retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
+                                    }
+                                    
+                                    if (taskItem != null && retryDelay > 0 && dbContext != null)
                                     {
                                         // Bugün başlamış en son Failed execution'ı bul (groupExecutionId olmadan)
                                         var latestFailedExecution = await dbContext.TaskExecutionHistories
@@ -1778,6 +1873,12 @@ public class TaskManagementService : ITaskManagementService
                             failedTasks,
                             totalErrors
                         );
+
+                        // Akış içindeyse bir sonraki grupları tetikle
+                        if (!string.IsNullOrEmpty(activeGroupExecution.FlowExecutionId))
+                        {
+                            await StartDependentGroupsAsync(group.Id, activeGroupExecution.FlowExecutionId);
+                        }
                     }
                 }
                 catch
@@ -2055,7 +2156,7 @@ public class TaskManagementService : ITaskManagementService
         return readyTaskItems;
     }
 
-    public async Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual")
+    public async Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null)
     {
         var group = await _dataService.GetGroupAsync(groupId);
         if (group == null)
@@ -2071,7 +2172,7 @@ public class TaskManagementService : ITaskManagementService
         }
 
         // Group execution history başlat
-        var groupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy);
+        var groupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowExecutionId);
         
         var groupName = group?.Name ?? groupId;
         Console.WriteLine($"[STATUS] Group '{groupName}' -> Started");
@@ -2153,7 +2254,7 @@ public class TaskManagementService : ITaskManagementService
         return dependentTaskIds;
     }
 
-    public async Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual")
+    public async Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual", string? flowExecutionId = null)
     {
         // 1. ADIM: Grup varlığını kontrol et
         var group = await _dataService.GetGroupAsync(groupId);
@@ -2185,7 +2286,7 @@ public class TaskManagementService : ITaskManagementService
         var tasksToExcludeFromHistory = FindAllDependentTasks(fromTaskItemId, assignments);
 
         // 6. ADIM: Yeni grup execution başlat
-        var newGroupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy);
+        var newGroupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowExecutionId);
 
         // 7. ADIM: 5. adımda bulunan task'lar harici tüm task statülerini yeni execution'a kopyala
         if (previousGroupExecution != null)
@@ -2333,6 +2434,112 @@ public class TaskManagementService : ITaskManagementService
         }
 
         return true;
+    }
+
+    public async Task<bool> StartFlowAsync(string flowItemId, string triggeredBy = "Manual")
+    {
+        // 1. Akışı kontrol et
+        var flowItem = await _dataService.GetFlowItemAsync(flowItemId);
+        if (flowItem == null) return false;
+
+        // 2. Akışa ait grupları al
+        var flowAssignments = await _dataService.GetFlowGroupAssignmentsAsync(flowItemId);
+        if (flowAssignments.Count == 0) return false;
+
+        // 3. Flow Execution History başlat
+        var flowExecution = await _executionHistoryService.StartFlowExecutionAsync(flowItemId, triggeredBy);
+        Console.WriteLine($"[STATUS] Flow '{flowItem.Name}' -> Started (ID: {flowExecution.Id})");
+
+        // 4. Tüm grupların FlowGroupAssignment statülerini sıfırla (Pending)
+        foreach (var assignment in flowAssignments)
+        {
+            assignment.Status = TaskItemStatus.Pending;
+            assignment.Progress = 0;
+            assignment.StartTime = null;
+            assignment.EndTime = null;
+            assignment.ErrorMessage = null;
+            assignment.LastErrorTime = null;
+            assignment.UpdatedAt = DateTime.UtcNow;
+            await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
+        }
+
+        // 5. Başlangıç gruplarını bul (Önşartı olmayan gruplar)
+        // flowAssignments içindeki PrerequisiteGroupIds listesini kontrol et
+        // PrerequisiteGroupIds boş olan veya akış içinde olmayan gruplar başlangıç grubudur.
+        
+        foreach (var assignment in flowAssignments)
+        {
+            bool hasPrerequisites = assignment.PrerequisiteGroupIds != null && 
+                                   assignment.PrerequisiteGroupIds.Count > 0 &&
+                                   assignment.PrerequisiteGroupIds.Any(pId => flowAssignments.Any(fa => fa.GroupId == pId));
+
+            if (!hasPrerequisites)
+            {
+                // Başlat
+                Console.WriteLine($"[FLOW] Starting initial group: {assignment.GroupId}");
+                await StartGroupAsync(assignment.GroupId, triggeredBy, flowExecution.Id);
+                
+                // FlowGroupAssignment durumunu Running yap
+                assignment.Status = TaskItemStatus.Running;
+                assignment.StartTime = DateTime.Now;
+                await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Tamamlanan bir grubu önşart olarak kullanan bağımlı grupları kontrol edip başlatır
+    /// </summary>
+    private async Task StartDependentGroupsAsync(string completedGroupId, string flowExecutionId)
+    {
+        // Flow execution history'den flowId'yi bul
+        var flowExecution = await _executionHistoryService.GetFlowExecutionHistoryAsync(flowExecutionId);
+        if (flowExecution == null) return;
+
+        var flowId = flowExecution.FlowItemId;
+        var assignments = await _dataService.GetFlowGroupAssignmentsAsync(flowId);
+        
+        foreach (var assignment in assignments)
+        {
+            // Bu grup, tamamlanan grubu önşart olarak kullanıyor mu?
+            if (assignment.PrerequisiteGroupIds != null && assignment.PrerequisiteGroupIds.Contains(completedGroupId))
+            {
+                // Grubun tüm önşartları tamamlandı mı?
+                bool allPrerequisitesCompleted = true;
+                foreach (var prereqId in assignment.PrerequisiteGroupIds)
+                {
+                    // Bu akış içindeki önşart grubunun durumunu kontrol et
+                    var prereqAssignment = assignments.FirstOrDefault(a => a.GroupId == prereqId);
+                    if (prereqAssignment == null || prereqAssignment.Status != TaskItemStatus.Completed)
+                    {
+                        // TODO: FlowGroupAssignment.Status'un güncel olduğundan emin olmalıyız.
+                        // Şimdilik sadece bu flow execution'a ait tamamlanmış group execution var mı ona bakalım.
+                        var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: prereqId);
+                        var completedPrereq = groupExecutions.Any(e => 
+                            e.FlowExecutionId == flowExecutionId && e.EndTime != null && e.FailedTasks == 0);
+                        
+                        if (!completedPrereq)
+                        {
+                            allPrerequisitesCompleted = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (allPrerequisitesCompleted)
+                {
+                    // Grubu başlat
+                    await StartGroupAsync(assignment.GroupId, "Flow", flowExecutionId);
+                    
+                    // FlowGroupAssignment durumunu Running yap
+                    assignment.Status = TaskItemStatus.Running;
+                    assignment.StartTime = DateTime.Now;
+                    await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
+                }
+            }
+        }
     }
 
     public async Task<bool> RestartTaskItemAsync(string taskItemId, string? groupId = null, string? triggeredBy = null)
@@ -2525,19 +2732,15 @@ public class TaskManagementService : ITaskManagementService
 
         if (activeSchedules.Count == 0)
         {
-            Console.WriteLine($"[Schedule] No active schedules found at {nowLocal:yyyy-MM-dd HH:mm:ss}");
             return;
         }
 
-        Console.WriteLine($"[Schedule] Checking {activeSchedules.Count} active schedule(s) at {nowLocal:yyyy-MM-dd HH:mm:ss}");
         
         // Tüm grupları listele (debug için)
         var allGroups = (await _dataService.GetDataAsync()).Groups;
-        Console.WriteLine($"[Schedule] Total groups in system: {allGroups.Count}");
         foreach (var group in allGroups)
         {
             var hasSchedule = activeSchedules.Any(s => s.GroupId == group.Id);
-            Console.WriteLine($"[Schedule] Group {group.Id} ({group.Name}): Has active schedule = {hasSchedule}");
         }
 
         foreach (var schedule in activeSchedules)
@@ -2545,8 +2748,6 @@ public class TaskManagementService : ITaskManagementService
             bool shouldRun = false;
             var startTimeToday = nowLocal.Date.Add(schedule.StartTime);
             
-            Console.WriteLine($"[Schedule] Group {schedule.GroupId}: StartTime={schedule.StartTime}, LastRunTime={schedule.LastRunTime?.ToLocalTime():yyyy-MM-dd HH:mm:ss}, WorkPeriod={schedule.WorkPeriod}");
-            Console.WriteLine($"[Schedule] Group {schedule.GroupId}: startTimeToday={startTimeToday:yyyy-MM-dd HH:mm:ss}, nowLocal={nowLocal:yyyy-MM-dd HH:mm:ss}");
             
             // Bugün için execution history var mı ve tamamlanmış mı kontrol et
             var historyService = _executionHistoryService as ExecutionHistoryService;
@@ -2641,11 +2842,9 @@ public class TaskManagementService : ITaskManagementService
                     
                     isExecutionCompleted = latestGroupExecution.EndTime.HasValue && allTasksFinished;
                     
-                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Has execution today: {hasExecutionToday}, IsCompleted: {isExecutionCompleted}, EndTime: {latestGroupExecution.EndTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "null"}, TotalTasks: {totalTasks}, Completed+Failed: {completedTasks + failedTasks}, GroupExecTotalTasks: {latestGroupExecution.TotalTasks}, GroupExecCompleted+Failed: {latestGroupExecution.CompletedTasks + latestGroupExecution.FailedTasks}");
                 }
                 else
                 {
-                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Has execution today: {hasExecutionToday}");
                 }
             }
             
@@ -2655,7 +2854,6 @@ public class TaskManagementService : ITaskManagementService
                 if (schedule.LastRunTime == null)
                 {
                     // İlk kez çalışacak - başlangıç saati geçtiyse çalıştır
-                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: First run - should run");
                     shouldRun = true;
                 }
                 else
@@ -2672,31 +2870,26 @@ public class TaskManagementService : ITaskManagementService
                             if (!hasExecutionToday)
                             {
                                 // Bugün hiç execution yoksa çalıştır
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Daily - no execution history today, should run");
                                 shouldRun = true;
                             }
                             else if (isExecutionCompleted)
                             {
                                 // Bugün execution var ve tamamlanmışsa, bir sonraki güne kadar beklemeli
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Daily - execution completed today, skipping (already ran today)");
                                 shouldRun = false;
                             }
                             else if (lastRunLocal.Date < nowLocal.Date)
                             {
                                 // Son çalıştırma dün veya daha önceyse bugün çalıştır
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Daily - last run was yesterday or earlier, should run");
                                 shouldRun = true;
                             }
                             else if (lastRunLocal.Date == nowLocal.Date && lastRunLocal < startTimeToday)
                             {
                                 // Bugün başlangıç saatinden önce çalıştırıldıysa, başlangıç saatinden sonra tekrar çalıştır
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Daily - last run was before start time today, should run");
                                 shouldRun = true;
                             }
                             else
                             {
                                 // Bugün başlangıç saatinden sonra çalıştırıldı ama henüz tamamlanmamış
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Daily - already ran today after start time and not completed, skipping");
                                 shouldRun = false;
                             }
                             break;
@@ -2711,7 +2904,6 @@ public class TaskManagementService : ITaskManagementService
                                 // Bu hafta hiç çalışmamış
                                 if (lastRunStartOfWeek < startOfWeek)
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Weekly - last run was last week or earlier, should run");
                                     shouldRun = true;
                                 }
                             }
@@ -2720,17 +2912,14 @@ public class TaskManagementService : ITaskManagementService
                                 // Execution tamamlanmışsa, bu hafta içinde başka bir çalıştırma yapılabilir
                                 if (lastRunStartOfWeek < startOfWeek)
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Weekly - execution completed, last run was last week, should run");
                                     shouldRun = true;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Weekly - execution completed but already ran this week, skipping");
                                 }
                             }
                             else
                             {
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Weekly - execution in progress, skipping");
                             }
                             break;
 
@@ -2742,7 +2931,6 @@ public class TaskManagementService : ITaskManagementService
                                 if (lastRunLocal.Year < nowLocal.Year || 
                                     (lastRunLocal.Year == nowLocal.Year && lastRunLocal.Month < nowLocal.Month))
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Monthly - last run was last month or earlier, should run");
                                     shouldRun = true;
                                 }
                             }
@@ -2752,17 +2940,14 @@ public class TaskManagementService : ITaskManagementService
                                 if (lastRunLocal.Year < nowLocal.Year || 
                                     (lastRunLocal.Year == nowLocal.Year && lastRunLocal.Month < nowLocal.Month))
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Monthly - execution completed, last run was last month, should run");
                                     shouldRun = true;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Monthly - execution completed but already ran this month, skipping");
                                 }
                             }
                             else
                             {
-                                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Monthly - execution in progress, skipping");
                             }
                             break;
                     }
@@ -2770,14 +2955,12 @@ public class TaskManagementService : ITaskManagementService
             }
             else
             {
-                Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Start time not reached yet (startTimeToday={startTimeToday:yyyy-MM-dd HH:mm:ss} > nowLocal={nowLocal:yyyy-MM-dd HH:mm:ss})");
             }
 
             if (shouldRun)
             {
                 try
                 {
-                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Starting group...");
                     var startResult = await StartGroupAsync(schedule.GroupId, "System");
                     
                     if (startResult)
@@ -2785,17 +2968,13 @@ public class TaskManagementService : ITaskManagementService
                         // Son çalıştırma zamanını güncelle
                         schedule.LastRunTime = now;
                         await _dataService.CreateOrUpdateGroupScheduleAsync(schedule);
-                        Console.WriteLine($"[Schedule] Group {schedule.GroupId}: Started successfully, LastRunTime updated to {now:yyyy-MM-dd HH:mm:ss}");
                     }
                     else
                     {
-                        Console.WriteLine($"[Schedule] Group {schedule.GroupId}: StartGroupAsync returned false");
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.WriteLine($"[Schedule] Group {schedule.GroupId}: ERROR - {ex.Message}");
-                    Console.WriteLine($"[Schedule] Stack trace: {ex.StackTrace}");
                 }
             }
         }
@@ -3003,7 +3182,7 @@ public class TaskManagementService : ITaskManagementService
                     if (isSqlFunction)
                     {
                         // SQL fonksiyonunu değişkene atayarak kullan (güvenlik: sadece izin verilen fonksiyonlar)
-                        if (IsAllowedSqlExpression(paramValue.Trim()))
+                        if (paramValue != null && IsAllowedSqlExpression(paramValue.Trim()))
                         {
                             // Değişken adı oluştur
                             var varName = $"@sqlVar{varIndex}";

@@ -131,7 +131,9 @@ builder.Services.AddScoped<IStoredProcedureDiscoveryService>(sp =>
     var dataService = sp.GetRequiredService<ITaskDataService>();
     return new StoredProcedureDiscoveryService(dbConfig, dbContext, dataService);
 });
-
+builder.Services.AddScoped<IFlowItemService, FlowItemService>();
+builder.Services.AddScoped<IFlowGroupAssignmentService, FlowGroupAssignmentService>();
+builder.Services.AddScoped<IFlowScheduleService, FlowScheduleService>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -217,6 +219,19 @@ async Task EnsureExecutionHistoryTablesAsync(TaskDbContext dbContext)
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND name = 'TriggeredBy')
                 BEGIN
                     ALTER TABLE [dbo].[TaskExecutionHistories] ADD [TriggeredBy] NVARCHAR(50) NULL;
+                END
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // Mevcut TaskItems tablosuna TimeoutMinutes kolonunu ekle (eğer yoksa)
+        command.CommandText = @"
+            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TaskItems]') AND type in (N'U'))
+            BEGIN
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskItems]') AND name = 'TimeoutMinutes')
+                BEGIN
+                    ALTER TABLE [dbo].[TaskItems]
+                    ADD [TimeoutMinutes] INT NOT NULL DEFAULT 720;
+                    PRINT '[DB] Added TimeoutMinutes column to TaskItems table';
                 END
             END";
         await command.ExecuteNonQueryAsync();
@@ -324,13 +339,260 @@ async Task EnsureExecutionHistoryTablesAsync(TaskDbContext dbContext)
             END";
         await command.ExecuteNonQueryAsync();
         
-        Console.WriteLine("[DB] ✓ Execution history, task parameters, role permissions and roles tables verified/created");
+        // TriggeredBy kolonlarının boyutunu artır (TaskExecutionHistories ve GroupExecutionHistories)
+        command.CommandText = @"
+            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND type in (N'U'))
+            BEGIN
+                IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND name = 'TriggeredBy' AND max_length < 200)
+                BEGIN
+                    ALTER TABLE [dbo].[TaskExecutionHistories]
+                    ALTER COLUMN [TriggeredBy] NVARCHAR(200) NULL;
+                    PRINT '[DB] Increased TriggeredBy column size in TaskExecutionHistories';
+                END
+            END
+
+            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND type in (N'U'))
+            BEGIN
+                IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'TriggeredBy' AND max_length < 200)
+                BEGIN
+                    ALTER TABLE [dbo].[GroupExecutionHistories]
+                    ALTER COLUMN [TriggeredBy] NVARCHAR(200) NULL;
+                    PRINT '[DB] Increased TriggeredBy column size in GroupExecutionHistories';
+                END
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowItems tablosunu kontrol et ve yoksa oluştur
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowItems]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowItems] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [Name] NVARCHAR(200) NOT NULL,
+                    [Description] NVARCHAR(1000) NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                PRINT '[DB] FlowItems table created successfully';
+            END
+            ELSE
+            BEGIN
+                PRINT '[DB] FlowItems table already exists';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowGroupAssignments tablosunu kontrol et ve yoksa oluştur
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowGroupAssignments] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [FlowItemId] NVARCHAR(50) NOT NULL,
+                    [GroupId] NVARCHAR(50) NOT NULL,
+                    [Order] INT NOT NULL,
+                    [PrerequisiteGroupIds] NVARCHAR(MAX) NULL,
+                    [Status] NVARCHAR(20) NULL,
+                    [ErrorMessage] NVARCHAR(2000) NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                
+                CREATE UNIQUE INDEX [IX_FlowGroupAssignments_FlowItemId_GroupId] ON [FlowGroupAssignments]([FlowItemId], [GroupId]);
+                PRINT '[DB] FlowGroupAssignments table created successfully';
+            END
+            ELSE
+            BEGIN
+                PRINT '[DB] FlowGroupAssignments table already exists';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowGroupAssignments tablosunu kontrol et ve yoksa oluştur
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowGroupAssignments] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [FlowItemId] NVARCHAR(50) NOT NULL,
+                    [GroupId] NVARCHAR(50) NOT NULL,
+                    [Order] INT NOT NULL DEFAULT 0,
+                    [PrerequisiteGroupIds] NVARCHAR(MAX) NULL,
+                    [Status] NVARCHAR(20) NOT NULL DEFAULT 'Pending',
+                    [StartTime] DATETIME2 NULL,
+                    [EndTime] DATETIME2 NULL,
+                    [LastErrorTime] DATETIME2 NULL,
+                    [Progress] INT NOT NULL DEFAULT 0,
+                    [ErrorMessage] NVARCHAR(2000) NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                
+                CREATE UNIQUE INDEX [IX_FlowGroupAssignments_FlowItem_Group] ON [FlowGroupAssignments]([FlowItemId], [GroupId]);
+                PRINT '[DB] FlowGroupAssignments table created successfully';
+            END
+            ELSE
+            BEGIN
+                PRINT '[DB] FlowGroupAssignments table already exists';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        Console.WriteLine("[DB] ✓ Execution history, task parameters, role permissions, roles tables verified/created");
         await connection.CloseAsync();
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[DB] WARNING: Could not create execution history tables: {ex.Message}");
         Console.WriteLine($"[DB] Please run the SQL script manually: Migrations/CreateDatabase.sql (lines 89-132)");
+    }
+    }
+
+// Yeni flow tablolarını kontrol et ve yoksa oluştur
+async Task EnsureFlowTablesAsync(TaskDbContext dbContext)
+{
+    try
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        // Bağlantı kapalıysa aç (açıksa işlem yapma)
+        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+        
+        using var command = connection.CreateCommand();
+        
+        // FlowItems tablosunu kontrol et
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowItems]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowItems] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [Name] NVARCHAR(200) NOT NULL,
+                    [Description] NVARCHAR(1000) NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                PRINT '[DB] FlowItems table created successfully';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowGroupAssignments tablosunu kontrol et
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowGroupAssignments] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [FlowItemId] NVARCHAR(50) NOT NULL,
+                    [GroupId] NVARCHAR(50) NOT NULL,
+                    [Order] INT NOT NULL DEFAULT 0,
+                    [PrerequisiteGroupIds] NVARCHAR(MAX) NULL, -- JSON formatında
+                    [Status] NVARCHAR(20) NOT NULL DEFAULT 'Pending',
+                    [StartTime] DATETIME2 NULL,
+                    [EndTime] DATETIME2 NULL,
+                    [LastErrorTime] DATETIME2 NULL,
+                    [Progress] INT NOT NULL DEFAULT 0,
+                    [ErrorMessage] NVARCHAR(2000) NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                
+                CREATE UNIQUE INDEX [IX_FlowGroupAssignments_FlowItemId_GroupId] ON [FlowGroupAssignments]([FlowItemId], [GroupId]);
+                PRINT '[DB] FlowGroupAssignments table created successfully';
+            END
+            ELSE
+            BEGIN
+                -- Mevcut tabloya eksik kolonları ekle
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'StartTime')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [StartTime] DATETIME2 NULL;
+                    PRINT '[DB] Added StartTime to FlowGroupAssignments';
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'EndTime')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [EndTime] DATETIME2 NULL;
+                    PRINT '[DB] Added EndTime to FlowGroupAssignments';
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'LastErrorTime')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [LastErrorTime] DATETIME2 NULL;
+                    PRINT '[DB] Added LastErrorTime to FlowGroupAssignments';
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'Progress')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [Progress] INT NOT NULL DEFAULT 0;
+                    PRINT '[DB] Added Progress to FlowGroupAssignments';
+                END
+                
+                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'ErrorMessage')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [ErrorMessage] NVARCHAR(2000) NULL;
+                    PRINT '[DB] Added ErrorMessage to FlowGroupAssignments';
+                END
+
+                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[FlowGroupAssignments]') AND name = 'Status')
+                BEGIN
+                    ALTER TABLE [dbo].[FlowGroupAssignments] ADD [Status] NVARCHAR(20) NOT NULL DEFAULT 'Pending';
+                    PRINT '[DB] Added Status to FlowGroupAssignments';
+                END
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowSchedules tablosunu kontrol et ve yoksa oluştur
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowSchedules]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowSchedules] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [FlowItemId] NVARCHAR(50) NOT NULL,
+                    [WorkPeriod] NVARCHAR(20) NOT NULL,
+                    [StartTime] TIME NOT NULL,
+                    [RestartOnError] BIT NOT NULL DEFAULT 0,
+                    [IsActive] BIT NOT NULL DEFAULT 1,
+                    [LastRunTime] DATETIME2 NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+                
+                CREATE UNIQUE INDEX [IX_FlowSchedules_FlowItemId] ON [FlowSchedules]([FlowItemId]);
+                PRINT '[DB] FlowSchedules table created successfully';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // FlowExecutionHistories - Akış çalışma geçmişi tablosu
+        command.CommandText = @"
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[FlowExecutionHistories]') AND type in (N'U'))
+            BEGIN
+                CREATE TABLE [dbo].[FlowExecutionHistories] (
+                    [Id] NVARCHAR(50) NOT NULL PRIMARY KEY,
+                    [FlowItemId] NVARCHAR(50) NOT NULL,
+                    [StartTime] DATETIME2 NOT NULL,
+                    [EndTime] DATETIME2 NULL,
+                    [Status] NVARCHAR(MAX) NOT NULL DEFAULT 'Running',
+                    [ErrorCount] INT NOT NULL DEFAULT 0,
+                    [TriggeredBy] NVARCHAR(MAX) NULL
+                );
+                
+                CREATE INDEX [IX_FlowExecutionHistories_FlowItemId] ON [FlowExecutionHistories]([FlowItemId]);
+                CREATE INDEX [IX_FlowExecutionHistories_StartTime] ON [FlowExecutionHistories]([StartTime]);
+                PRINT '[DB] FlowExecutionHistories table created successfully';
+            END";
+        await command.ExecuteNonQueryAsync();
+
+        // GroupExecutionHistories tablosunu güncelle - FlowExecutionId ekle
+        command.CommandText = @"
+            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND type in (N'U'))
+            BEGIN
+                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowExecutionId')
+                BEGIN
+                    ALTER TABLE [dbo].[GroupExecutionHistories] ADD [FlowExecutionId] NVARCHAR(MAX) NULL;
+                    PRINT '[DB] Added FlowExecutionId to GroupExecutionHistories';
+                END
+            END";
+        await command.ExecuteNonQueryAsync();
+        
+        Console.WriteLine("[DB] ✓ Flow tables verified/created");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[DB] WARNING: Could not create flow tables: {ex.Message}");
     }
 }
 
@@ -362,6 +624,9 @@ if (dbConfig.UseDatabase && !string.IsNullOrEmpty(dbConfig.Server) && !string.Is
                 
                 // Yeni execution history tablolarını kontrol et ve yoksa oluştur
                 await EnsureExecutionHistoryTablesAsync(dbContext);
+
+                // Yeni flow tablolarını kontrol et ve yoksa oluştur
+                await EnsureFlowTablesAsync(dbContext);
             }
             
             // Varsayılan rolleri oluştur (yoksa)
@@ -587,7 +852,6 @@ timer.Elapsed += async (sender, e) =>
         
         using var scope = app.Services.CreateScope();
         var managementService = scope.ServiceProvider.GetRequiredService<ITaskManagementService>();
-        
         await managementService.CheckAndUpdateTaskItemStatusesAsync();
         await managementService.CheckAndTriggerScheduledGroupsAsync();
     }

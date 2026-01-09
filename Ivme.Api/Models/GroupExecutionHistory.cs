@@ -15,6 +15,7 @@ public class GroupExecutionHistory
     public int FailedTasks { get; set; } = 0; // Başarısız task sayısı
     public int TotalErrors { get; set; } = 0; // Toplam hata sayısı
     public string? TriggeredBy { get; set; } // Schedule, Manual, vb.
+    public string? FlowExecutionId { get; set; } // Hangi akış execution'ına ait olduğu
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

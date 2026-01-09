@@ -8,5 +8,6 @@ public interface IPermissionService
     Task<Dictionary<string, List<string>>> GetAllRolePermissionsAsync();
     Task UpdateRolePermissionsAsync(string role, List<string> permissions);
     Task InitializeDefaultPermissionsAsync();
+    Task<bool> HasPermissionAsync(string? username, string permission);
 }
 

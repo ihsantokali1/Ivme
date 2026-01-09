@@ -79,7 +79,10 @@ public class TaskDataService : ITaskDataService
                 Groups = await dbContext.Groups.AsNoTracking().ToListAsync(),
                 TaskItems = taskItems,
                 GroupTaskAssignments = await dbContext.GroupTaskAssignments.AsNoTracking().ToListAsync(),
-                GroupSchedules = await dbContext.GroupSchedules.AsNoTracking().ToListAsync()
+                GroupSchedules = await dbContext.GroupSchedules.AsNoTracking().ToListAsync(),
+                FlowItems = await dbContext.FlowItems.AsNoTracking().ToListAsync(),
+                FlowGroupAssignments = await dbContext.FlowGroupAssignments.AsNoTracking().ToListAsync(),
+                FlowSchedules = await dbContext.FlowSchedules.AsNoTracking().ToListAsync()
             };
         }
 
@@ -688,6 +691,73 @@ public class TaskDataService : ITaskDataService
         return data.GroupSchedules
             .Where(s => s.IsActive)
             .ToList();
+    }
+
+    // Flow işlemleri
+    public async Task<FlowItem?> GetFlowItemAsync(string flowItemId)
+    {
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            return await dbContext.FlowItems.FirstOrDefaultAsync(f => f.Id == flowItemId);
+        }
+
+        var data = await GetDataAsync();
+        return data.FlowItems.FirstOrDefault(f => f.Id == flowItemId);
+    }
+
+    public async Task<List<FlowGroupAssignment>> GetFlowGroupAssignmentsAsync(string flowItemId)
+    {
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            return await dbContext.FlowGroupAssignments
+                .Where(a => a.FlowItemId == flowItemId)
+                .OrderBy(a => a.Order)
+                .ToListAsync();
+        }
+
+        var data = await GetDataAsync();
+        return data.FlowGroupAssignments
+            .Where(a => a.FlowItemId == flowItemId)
+            .OrderBy(a => a.Order)
+            .ToList();
+    }
+
+    public async Task<FlowGroupAssignment> UpdateFlowGroupAssignmentAsync(FlowGroupAssignment assignment)
+    {
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            var existing = await dbContext.FlowGroupAssignments.FirstOrDefaultAsync(a => a.Id == assignment.Id);
+            if (existing == null)
+                throw new KeyNotFoundException($"FlowGroupAssignment with id {assignment.Id} not found");
+
+            existing.Status = assignment.Status;
+            existing.Progress = assignment.Progress;
+            existing.StartTime = assignment.StartTime;
+            existing.EndTime = assignment.EndTime;
+            existing.LastErrorTime = assignment.LastErrorTime;
+            existing.ErrorMessage = assignment.ErrorMessage;
+            existing.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync();
+            return existing;
+        }
+
+        var data = await GetDataAsync();
+        var existingJson = data.FlowGroupAssignments.FirstOrDefault(a => a.Id == assignment.Id);
+        if (existingJson == null)
+            throw new KeyNotFoundException($"FlowGroupAssignment with id {assignment.Id} not found");
+
+        existingJson.Status = assignment.Status;
+        existingJson.Progress = assignment.Progress;
+        existingJson.StartTime = assignment.StartTime;
+        existingJson.EndTime = assignment.EndTime;
+        existingJson.LastErrorTime = assignment.LastErrorTime;
+        existingJson.ErrorMessage = assignment.ErrorMessage;
+        existingJson.UpdatedAt = DateTime.UtcNow;
+        await SaveDataAsync(data);
+        return existingJson;
     }
 }
 

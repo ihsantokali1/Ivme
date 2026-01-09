@@ -2,6 +2,7 @@ export type UserRole = 'Admin' | 'User';
 
 export type Permission = 
   // Sayfa bazlı
+  | 'pages.dashboard.view'
   | 'pages.tasks.view'
   | 'pages.tasks.create'
   | 'pages.tasks.update'
@@ -21,6 +22,10 @@ export type Permission =
   | 'pages.users.create'
   | 'pages.users.update'
   | 'pages.users.delete'
+  | 'pages.flow.view'
+  | 'pages.flow.create'
+  | 'pages.flow.update'
+  | 'pages.flow.delete'
   // Action bazlı
   | 'actions.task.start'
   | 'actions.task.stop'
@@ -36,19 +41,23 @@ export type Permission =
 // Varsayılan yetki matrisi (fallback için)
 const defaultRolePermissions: Record<UserRole, Permission[]> = {
   Admin: [
+    'pages.dashboard.view',
     'pages.tasks.view', 'pages.tasks.create', 'pages.tasks.update', 'pages.tasks.delete',
     'pages.groups.view', 'pages.groups.create', 'pages.groups.update', 'pages.groups.delete',
     'pages.configuration.view', 'pages.configuration.update',
     'pages.schedule.view', 'pages.schedule.update',
     'pages.management.view', 'pages.history.view', 'pages.tv.view',
     'pages.users.view', 'pages.users.create', 'pages.users.update', 'pages.users.delete',
+    'pages.flow.view', 'pages.flow.create', 'pages.flow.update', 'pages.flow.delete',
     'actions.task.start', 'actions.task.stop', 'actions.task.pause', 'actions.task.resume',
     'actions.task.complete', 'actions.task.markAsSuccess', 'actions.task.fail', 'actions.task.restart',
     'actions.group.start', 'actions.group.stop'
   ],
   User: [
+    'pages.dashboard.view',
     'pages.tasks.view', 'pages.groups.view', 'pages.configuration.view',
     'pages.schedule.view', 'pages.management.view', 'pages.history.view', 'pages.tv.view',
+    'pages.flow.view',
     'actions.task.start', 'actions.task.stop', 'actions.task.pause', 'actions.task.resume',
     'actions.task.complete', 'actions.task.markAsSuccess', 'actions.task.fail', 'actions.task.restart',
     'actions.group.start', 'actions.group.stop'
@@ -76,8 +85,18 @@ async function fetchRolePermissions(): Promise<Record<string, Permission[]>> {
     const result: Record<string, Permission[]> = {};
     
     // Admin ve User için varsayılan yetkileri ekle
-    result['Admin'] = (allPermissions['Admin'] || defaultRolePermissions.Admin) as Permission[];
-    result['User'] = (allPermissions['User'] || defaultRolePermissions.User) as Permission[];
+    // API'den gelenler ile varsayılanları BİRLEŞTİR (Union) - Böylece DB eksik olsa bile kod çalışır
+    const adminPerms = new Set([
+      ...(defaultRolePermissions.Admin || []),
+      ...(allPermissions['Admin'] || [])
+    ]);
+    result['Admin'] = Array.from(adminPerms) as Permission[];
+
+    const userPerms = new Set([
+      ...(defaultRolePermissions.User || []),
+      ...(allPermissions['User'] || [])
+    ]);
+    result['User'] = Array.from(userPerms) as Permission[];
     
     // API'den gelen diğer rolleri de ekle
     Object.keys(allPermissions).forEach(role => {

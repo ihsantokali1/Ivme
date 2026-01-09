@@ -27,5 +27,10 @@ public interface ITaskDataService
     Task<GroupSchedule?> GetGroupScheduleAsync(string groupId);
     Task<bool> DeleteGroupScheduleAsync(string scheduleId);
     Task<List<GroupSchedule>> GetActiveGroupSchedulesAsync();
+
+    // Flow işlemleri
+    Task<FlowItem?> GetFlowItemAsync(string flowItemId);
+    Task<List<FlowGroupAssignment>> GetFlowGroupAssignmentsAsync(string flowItemId);
+    Task<FlowGroupAssignment> UpdateFlowGroupAssignmentAsync(FlowGroupAssignment assignment);
 }
 

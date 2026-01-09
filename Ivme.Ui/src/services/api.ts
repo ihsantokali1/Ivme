@@ -42,6 +42,26 @@ export type TaskGroup = {
   updatedAt: string;
 };
 
+export type FlowItem = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FlowGroupAssignment = {
+  id: string;
+  flowItemId: string;
+  groupId: string;
+  order: number;
+  prerequisiteGroupIds: string[];
+  status?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GroupTaskAssignment = {
   id: string;
   groupId: string;
@@ -58,6 +78,7 @@ export type GroupTaskAssignment = {
   createdAt: string;
   updatedAt: string;
 };
+
 
 export type GroupSchedule = {
   id: string;
@@ -105,6 +126,7 @@ export type GroupExecutionHistory = {
   createdAt: string;
 };
 
+
 const API_BASE_URL = 'http://localhost:5041/api';
 const TOKEN_KEY = 'ivme_auth_token';
 
@@ -112,18 +134,18 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 saniye timeout
-    
+
     // Token'ı header'a ekle
     const token = localStorage.getItem(TOKEN_KEY);
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options?.headers,
+      ...(options?.headers as Record<string, string>),
     };
-    
+
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       signal: controller.signal,
@@ -147,19 +169,19 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
           window.location.href = '/login';
         }
       }
-      
+
       const errorText = await response.text().catch(() => response.statusText);
       throw new Error(`API error (${response.status}): ${errorText || response.statusText}`);
     }
 
     // Response body'yi kontrol et
     const text = await response.text();
-    
+
     // Boş response ise undefined döndür
     if (!text || text.trim() === '') {
       return undefined as T;
     }
-    
+
     // JSON parse et
     try {
       return JSON.parse(text);
@@ -202,6 +224,45 @@ export const taskGroupsApi = {
       headers: {
         'Content-Type': 'application/json',
       },
+    }),
+};
+
+export const flowItemsApi = {
+  getAll: () => fetchApi<FlowItem[]>('/flow-items'),
+  getById: (id: string) => fetchApi<FlowItem>(`/flow-items/${id}`),
+  create: (flow: Omit<FlowItem, 'id' | 'createdAt' | 'updatedAt'>) =>
+    fetchApi<FlowItem>('/flow-items', {
+      method: 'POST',
+      body: JSON.stringify(flow),
+    }),
+  update: (flow: FlowItem) =>
+    fetchApi<FlowItem>(`/flow-items/${flow.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(flow),
+    }),
+  delete: (id: string) =>
+    fetchApi<void>(`/flow-items/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+
+export const flowGroupAssignmentsApi = {
+  getAll: () => fetchApi<FlowGroupAssignment[]>('/flow-group-assignments'),
+  getByFlowId: (flowId: string) => fetchApi<FlowGroupAssignment[]>(`/flow-group-assignments/flow/${flowId}`),
+  create: (assignment: Omit<FlowGroupAssignment, 'id' | 'createdAt' | 'updatedAt'>) =>
+    fetchApi<FlowGroupAssignment>('/flow-group-assignments', {
+      method: 'POST',
+      body: JSON.stringify(assignment),
+    }),
+  update: (assignment: FlowGroupAssignment) =>
+    fetchApi<void>(`/flow-group-assignments/${assignment.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(assignment),
+    }),
+  delete: (id: string) =>
+    fetchApi<void>(`/flow-group-assignments/${id}`, {
+      method: 'DELETE',
     }),
 };
 
@@ -259,7 +320,7 @@ export const taskItemsApi = {
       console.warn('[API] groupId is missing!');
     }
     const queryString = params.toString();
-    const url = queryString 
+    const url = queryString
       ? `/tasks/${id}/mark-as-success?${queryString}`
       : `/tasks/${id}/mark-as-success`;
     console.log('[API] Final URL:', url);
@@ -336,6 +397,35 @@ export const groupSchedulesApi = {
     }),
   delete: (id: string) =>
     fetchApi<void>(`/groupschedules/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }),
+};
+
+export type FlowSchedule = {
+  id: string;
+  flowItemId: string;
+  workPeriod: 'Daily' | 'Weekly' | 'Monthly';
+  startTime: string; // TimeSpan formatında (örn: "09:00:00")
+  restartOnError: boolean;
+  isActive: boolean;
+  lastRunTime?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const flowSchedulesApi = {
+  getByFlow: (flowItemId: string) =>
+    fetchApi<FlowSchedule>(`/flowschedules/flow/${flowItemId}`),
+  createOrUpdate: (schedule: Omit<FlowSchedule, 'id' | 'createdAt' | 'updatedAt'> | FlowSchedule) =>
+    fetchApi<FlowSchedule>('/flowschedules', {
+      method: 'POST',
+      body: JSON.stringify(schedule),
+    }),
+  delete: (id: string) =>
+    fetchApi<void>(`/flowschedules/${id}`, {
       method: 'DELETE',
     }),
 };
@@ -446,5 +536,20 @@ export const rolesApi = {
   delete: (id: string) =>
     fetchApi<{ message: string }>(`/role/${id}`, {
       method: 'DELETE',
+    }),
+};
+
+export const flowExecutionApi = {
+  start: (flowId: string, triggeredBy: string = 'Manual') =>
+    fetchApi<{ message: string }>(`/flow-execution/${flowId}/start?triggeredBy=${triggeredBy}`, {
+      method: 'POST',
+    }),
+  stop: (flowId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/${flowId}/stop`, {
+      method: 'POST',
+    }),
+  resume: (flowId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/${flowId}/resume`, {
+      method: 'POST',
     }),
 };

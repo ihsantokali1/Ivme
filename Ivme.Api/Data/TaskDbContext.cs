@@ -20,6 +20,10 @@ public class TaskDbContext : DbContext
     public DbSet<User> Users { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<Role> Roles { get; set; }
+    public DbSet<FlowItem> FlowItems { get; set; }
+    public DbSet<FlowGroupAssignment> FlowGroupAssignments { get; set; }
+    public DbSet<FlowSchedule> FlowSchedules { get; set; }
+    public DbSet<FlowExecutionHistory> FlowExecutionHistories { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -97,7 +101,8 @@ public class TaskDbContext : DbContext
                         (c1, c2) => c1 != null && c2 != null && c1.SequenceEqual(c2),
                         c => c != null ? c.Aggregate(0, (a, v) => HashCode.Combine(a, v != null ? v.GetHashCode() : 0)) : 0,
                         c => c != null ? c.ToList() : new List<string>()))
-                .HasColumnType("nvarchar(max)");
+                .HasColumnType("nvarchar(max)")
+                .IsRequired(false);
             
             // TaskParameterValues'i JSON olarak sakla
             entity.Property(e => e.TaskParameterValues)
@@ -154,7 +159,7 @@ public class TaskDbContext : DbContext
                 .HasColumnType("nvarchar(max)")
                 .IsRequired(false);
             
-            entity.Property(e => e.TriggeredBy).HasMaxLength(50);
+            entity.Property(e => e.TriggeredBy).HasMaxLength(200).IsRequired(false);
             
             entity.HasIndex(e => e.TaskItemId);
             entity.HasIndex(e => e.GroupId);
@@ -169,7 +174,7 @@ public class TaskDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(50);
             entity.Property(e => e.GroupId).HasMaxLength(50).IsRequired();
-            entity.Property(e => e.TriggeredBy).HasMaxLength(50);
+            entity.Property(e => e.TriggeredBy).HasMaxLength(200).IsRequired(false);
             entity.HasIndex(e => e.GroupId);
             entity.HasIndex(e => e.StartTime);
         });
@@ -208,6 +213,71 @@ public class TaskDbContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.HasIndex(e => e.Name).IsUnique();
         });
+
+        // FlowItem
+        modelBuilder.Entity<FlowItem>(entity =>
+        {
+            entity.ToTable("FlowItems");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(1000);
+        });
+
+        // FlowGroupAssignment
+        modelBuilder.Entity<FlowGroupAssignment>(entity =>
+        {
+            entity.ToTable("FlowGroupAssignments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.FlowItemId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.GroupId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Status).HasConversion<string>().HasMaxLength(20);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(2000);
+            
+            // PrerequisiteGroupIds'i JSON olarak sakla
+            var jsonOptions = new System.Text.Json.JsonSerializerOptions();
+            entity.Property(e => e.PrerequisiteGroupIds)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, jsonOptions),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, jsonOptions) ?? new List<string>(),
+                    new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<string>>(
+                        (c1, c2) => c1 != null && c2 != null && c1.SequenceEqual(c2),
+                        c => c != null ? c.Aggregate(0, (a, v) => HashCode.Combine(a, v != null ? v.GetHashCode() : 0)) : 0,
+                        c => c != null ? c.ToList() : new List<string>()))
+                .HasColumnType("nvarchar(max)")
+                .IsRequired(false);
+            
+            entity.HasIndex(e => new { e.FlowItemId, e.GroupId }).IsUnique();
+        });
+
+        // FlowSchedule
+        modelBuilder.Entity<FlowSchedule>(entity =>
+        {
+            entity.ToTable("FlowSchedules");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.FlowItemId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.WorkPeriod).HasConversion<string>().HasMaxLength(20);
+            
+            entity.HasIndex(e => e.FlowItemId).IsUnique();
+        });
+
+        // FlowExecutionHistory
+        modelBuilder.Entity<FlowExecutionHistory>(entity =>
+        {
+            entity.ToTable("FlowExecutionHistories");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FlowItemId).IsRequired();
+            entity.Property(e => e.StartTime).HasColumnType("datetime2");
+            entity.Property(e => e.EndTime).HasColumnType("datetime2");
+            
+            // FlowItemId üzerinde index
+            entity.HasIndex(e => e.FlowItemId);
+            // StartTime üzerinde index (sorgulama performansı için)
+            entity.HasIndex(e => e.StartTime);
+        });
+
     }
 }
 
