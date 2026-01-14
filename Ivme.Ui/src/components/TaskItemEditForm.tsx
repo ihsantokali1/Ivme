@@ -17,6 +17,8 @@ export default function TaskItemEditForm({
     name: taskItem.name,
     description: taskItem.description,
     retryIntervalMinutes: taskItem.retryIntervalMinutes,
+    storedProcedureDatabase: taskItem.storedProcedureDatabase || '',
+    storedProcedureSchema: taskItem.storedProcedureSchema || 'dbo',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,6 +29,8 @@ export default function TaskItemEditForm({
         name: formData.name,
         description: formData.description,
         retryIntervalMinutes: formData.retryIntervalMinutes,
+        storedProcedureDatabase: formData.storedProcedureDatabase,
+        storedProcedureSchema: formData.storedProcedureSchema,
       });
       onSave();
     } catch (err) {
@@ -65,6 +69,28 @@ export default function TaskItemEditForm({
               className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Veritabanı:</span>
+              <input
+                type="text"
+                value={formData.storedProcedureDatabase}
+                onChange={(e) => setFormData({ ...formData, storedProcedureDatabase: e.target.value })}
+                placeholder="Örn: IvmeDB"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Şema:</span>
+              <input
+                type="text"
+                value={formData.storedProcedureSchema}
+                onChange={(e) => setFormData({ ...formData, storedProcedureSchema: e.target.value })}
+                placeholder="Örn: dbo"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          </div>
           <div className="flex gap-2 justify-end">
             <button type="submit" className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
               Kaydet

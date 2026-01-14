@@ -759,5 +759,53 @@ public class TaskDataService : ITaskDataService
         await SaveDataAsync(data);
         return existingJson;
     }
+
+    public async Task<List<FlowSchedule>> GetActiveFlowSchedulesAsync()
+    {
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            return await dbContext.FlowSchedules
+                .Where(s => s.IsActive)
+                .ToListAsync();
+        }
+
+        var data = await GetDataAsync();
+        return data.FlowSchedules
+            .Where(s => s.IsActive)
+            .ToList();
+    }
+
+    public async Task<FlowSchedule> UpdateFlowScheduleAsync(FlowSchedule schedule)
+    {
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            var existing = await dbContext.FlowSchedules.FirstOrDefaultAsync(s => s.Id == schedule.Id);
+            if (existing == null)
+                throw new KeyNotFoundException($"FlowSchedule with id {schedule.Id} not found");
+
+            existing.LastRunTime = schedule.LastRunTime;
+            existing.IsActive = schedule.IsActive;
+            existing.WorkPeriod = schedule.WorkPeriod;
+            existing.StartTime = schedule.StartTime;
+            existing.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync();
+            return existing;
+        }
+
+        var data = await GetDataAsync();
+        var existingJson = data.FlowSchedules.FirstOrDefault(s => s.Id == schedule.Id);
+        if (existingJson == null)
+            throw new KeyNotFoundException($"FlowSchedule with id {schedule.Id} not found");
+
+        existingJson.LastRunTime = schedule.LastRunTime;
+        existingJson.IsActive = schedule.IsActive;
+        existingJson.WorkPeriod = schedule.WorkPeriod;
+        existingJson.StartTime = schedule.StartTime;
+        existingJson.UpdatedAt = DateTime.UtcNow;
+        await SaveDataAsync(data);
+        return existingJson;
+    }
 }
 

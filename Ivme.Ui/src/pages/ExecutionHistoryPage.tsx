@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import type { TaskExecutionHistory, GroupExecutionHistory, TaskItem, TaskGroup, User } from '../services/api';
-import { executionHistoryApi, taskItemsApi, taskGroupsApi, usersApi } from '../services/api';
+import type { TaskExecutionHistory, GroupExecutionHistory, FlowExecutionHistory, TaskItem, TaskGroup, FlowItem, User } from '../services/api';
+import { executionHistoryApi, taskItemsApi, taskGroupsApi, flowItemsApi, usersApi } from '../services/api';
 
 export default function ExecutionHistoryPage() {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'groups'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'groups' | 'flows'>('tasks');
   const [taskHistories, setTaskHistories] = useState<TaskExecutionHistory[]>([]);
   const [groupHistories, setGroupHistories] = useState<GroupExecutionHistory[]>([]);
+  const [flowHistories, setFlowHistories] = useState<FlowExecutionHistory[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [groups, setGroups] = useState<TaskGroup[]>([]);
+  const [flows, setFlows] = useState<FlowItem[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,6 +17,7 @@ export default function ExecutionHistoryPage() {
   // Filtreler
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [selectedFlowId, setSelectedFlowId] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
@@ -25,21 +28,25 @@ export default function ExecutionHistoryPage() {
   useEffect(() => {
     if (activeTab === 'tasks') {
       loadTaskHistories();
-    } else {
+    } else if (activeTab === 'groups') {
       loadGroupHistories();
+    } else {
+      loadFlowHistories();
     }
-  }, [activeTab, selectedTaskId, selectedGroupId, startDate, endDate]);
+  }, [activeTab, selectedTaskId, selectedGroupId, selectedFlowId, startDate, endDate]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [tasksData, groupsData, usersData] = await Promise.all([
+      const [tasksData, groupsData, flowsData, usersData] = await Promise.all([
         taskItemsApi.getAll(),
         taskGroupsApi.getAll(),
+        flowItemsApi.getAll(),
         usersApi.getAll(),
       ]);
       setTasks(tasksData);
       setGroups(groupsData);
+      setFlows(flowsData);
       setUsers(usersData);
     } catch (err) {
       setError('Veriler yüklenirken hata oluştu');
@@ -86,6 +93,24 @@ export default function ExecutionHistoryPage() {
     }
   };
 
+  const loadFlowHistories = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const params: any = {};
+      if (selectedFlowId) params.flowItemId = selectedFlowId;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = `${endDate}T23:59:59`;
+      const data = await executionHistoryApi.getFlowHistories(params);
+      setFlowHistories(data);
+    } catch (err) {
+      setError('Akış geçmişi yüklenirken hata oluştu');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatDuration = (duration?: string) => {
     if (!duration) return '-';
     try {
@@ -121,6 +146,10 @@ export default function ExecutionHistoryPage() {
     return groups.find(g => g.id === groupId)?.name || groupId;
   };
 
+  const getFlowName = (flowId: string) => {
+    return flows.find(f => f.id === flowId)?.name || flowId;
+  };
+
   const getUserName = (userId?: string) => {
     if (!userId || userId === 'System') return null;
     const user = users.find(u => u.id === userId);
@@ -141,24 +170,31 @@ export default function ExecutionHistoryPage() {
     <div className="py-4">
       <div className="flex gap-2 mb-6">
         <button
-          className={`px-6 py-3 rounded-lg font-medium transition-all ${
-            activeTab === 'tasks'
-              ? 'bg-blue-600 text-white shadow-md border-2 border-blue-600'
-              : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-          }`}
+          className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'tasks'
+            ? 'bg-blue-600 text-white shadow-md border-2 border-blue-600'
+            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+            }`}
           onClick={() => setActiveTab('tasks')}
         >
           Task Geçmişi
         </button>
         <button
-          className={`px-6 py-3 rounded-lg font-medium transition-all ${
-            activeTab === 'groups'
-              ? 'bg-blue-600 text-white shadow-md border-2 border-blue-600'
-              : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-          }`}
+          className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'groups'
+            ? 'bg-blue-600 text-white shadow-md border-2 border-blue-600'
+            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+            }`}
           onClick={() => setActiveTab('groups')}
         >
           Grup Geçmişi
+        </button>
+        <button
+          className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'flows'
+            ? 'bg-blue-600 text-white shadow-md border-2 border-blue-600'
+            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+            }`}
+          onClick={() => setActiveTab('flows')}
+        >
+          Akış Geçmişi
         </button>
       </div>
 
@@ -178,19 +214,36 @@ export default function ExecutionHistoryPage() {
             </select>
           </div>
         )}
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Grup:</label>
-          <select
-            value={selectedGroupId}
-            onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">Tüm Gruplar</option>
-            {groups.map(group => (
-              <option key={group.id} value={group.id}>{group.name}</option>
-            ))}
-          </select>
-        </div>
+        {activeTab === 'flows' && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Akış:</label>
+            <select
+              value={selectedFlowId}
+              onChange={(e) => setSelectedFlowId(e.target.value)}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Tüm Akışlar</option>
+              {flows.map(flow => (
+                <option key={flow.id} value={flow.id}>{flow.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {(activeTab === 'tasks' || activeTab === 'groups') && (
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Grup:</label>
+            <select
+              value={selectedGroupId}
+              onChange={(e) => setSelectedGroupId(e.target.value)}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Tüm Gruplar</option>
+              {groups.map(group => (
+                <option key={group.id} value={group.id}>{group.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Başlangıç Tarihi:</label>
           <input
@@ -209,7 +262,7 @@ export default function ExecutionHistoryPage() {
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <button 
+        <button
           className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
           onClick={activeTab === 'tasks' ? loadTaskHistories : loadGroupHistories}
         >
@@ -367,6 +420,72 @@ export default function ExecutionHistoryPage() {
                       {history.failedTasks}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.totalErrors}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                      {history.triggeredBy === 'System' ? (
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
+                          Sistem
+                        </span>
+                      ) : history.triggeredBy ? (
+                        (() => {
+                          const userName = getUserName(history.triggeredBy);
+                          return userName ? (
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
+                              {userName}
+                            </span>
+                          ) : (
+                            <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
+                              -
+                            </span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-gray-500 dark:text-gray-400">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {activeTab === 'flows' && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead className="bg-gray-100 dark:bg-gray-700">
+              <tr>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Akış</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Süre</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Durum</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Hata Sayısı</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tetikleyen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flowHistories.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                    {loading ? 'Yükleniyor...' : 'Kayıt bulunamadı'}
+                  </td>
+                </tr>
+              ) : (
+                flowHistories.map(history => (
+                  <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getFlowName(history.flowItemId)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.endTime ? (new Date(history.endTime).getTime() - new Date(history.startTime).getTime()).toString() : undefined)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="px-2 py-1 rounded-full text-xs font-medium text-white"
+                        style={{ backgroundColor: getStatusColor(history.status) }}
+                      >
+                        {history.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.errorCount}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                       {history.triggeredBy === 'System' ? (
                         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">

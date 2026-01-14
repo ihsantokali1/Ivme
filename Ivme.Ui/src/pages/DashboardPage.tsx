@@ -17,27 +17,23 @@ export default function DashboardPage() {
 
   const loadDashboardData = async () => {
     try {
-      // Bugünün istatistiklerini al
-      const todayStats = await executionHistoryApi.getTodayStatuses();
-      // Hataları al
-      const todayErrors = await executionHistoryApi.getTodayStatusesWithErrors();
-      
+      // Dashboard metrics'i API'den al
+      const metrics = await executionHistoryApi.getDashboardMetrics();
+
       setStats({
-        completed: Number(todayStats['Completed'] || 0),
-        failed: Number(todayStats['Failed'] || 0),
-        running: Number(todayStats['Running'] || 0)
+        completed: Number(metrics?.SuccessfulTasksToday || 0),
+        failed: Number((metrics?.TotalTasksToday || 0) - (metrics?.SuccessfulTasksToday || 0)),
+        running: Number(metrics?.ActiveTasks || 0),
       });
 
-      // Hataları formatla
-      const errors = Object.entries(todayErrors || {})
-        .filter(([_, val]) => val.status === 'Failed')
-        .map(([key, val]) => ({
-          taskName: key, // Bu aslında TaskId dönüyor olabilir, API'ye bakmak lazım
-          error: val.errorMessage || 'Bilinmeyen Hata',
-          time: new Date().toLocaleTimeString() // API'den zaman dönmüyorsa şimdilik
+      const errors = (metrics?.FailedLastAttemptToday || [])
+        .map((it) => ({
+          taskName: it.Type + " : " + (it.Name || it.Id),
+          error: it.ErrorMessage || 'Bilinmeyen Hata',
+          time: it.LastAttemptTime ? new Date(it.LastAttemptTime).toLocaleTimeString() : new Date().toLocaleTimeString(),
         }))
-        .slice(0, 5); // Son 5 hata
-        
+        .slice(0, 5);
+
       setRecentErrors(errors);
     } catch (error) {
       console.error('Dashboard yüklenirken hata:', error);

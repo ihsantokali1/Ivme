@@ -16,107 +16,96 @@ import { taskGroupsApi, taskItemsApi, groupTaskAssignmentsApi, executionHistoryA
 import type { TaskGroup, TaskItem, GroupTaskAssignment, GroupExecutionHistory, TaskExecutionHistory } from '../services/api';
 import { calculateTaskLevels } from '../utils/taskSorting';
 
-// Task durumuna göre renk belirleme
+// Task durumuna göre renk belirleme (ManagementPage ile senkronize)
 const getStatusColor = (status: string | undefined): string => {
   switch (status) {
-    case 'Running':
-      return '#10b981'; // Yeşil
-    case 'Completed':
-      return '#3b82f6'; // Mavi
-    case 'Failed':
-      return '#ef4444'; // Kırmızı
-    case 'WaitingRetry':
-      return '#f59e0b'; // Turuncu
-    case 'Paused':
-      return '#6b7280'; // Gri
+    case 'Running': return '#eab308'; // Sarı
     case 'Ready':
-      return '#8b5cf6'; // Mor
-    case 'Pending':
-    default:
-      return '#9ca3af'; // Açık gri
+    case 'Pending': return '#9ca3af'; // Gri
+    case 'WaitingRetry': return '#f59e0b'; // Turuncu
+    case 'Paused': return '#6b7280'; // Gri
+    case 'Completed': return '#059669'; // Koyu yeşil
+    case 'MarkedAsSuccess': return '#4ade80'; // Orta ton yeşil
+    case 'Failed': return '#ef4444'; // Kırmızı
+    default: return '#9ca3af';
   }
 };
 
+const statusLabels: Record<string, string> = {
+  Pending: 'Beklemede',
+  Ready: 'Hazır',
+  Running: 'Çalışıyor',
+  Paused: 'Duraklatıldı',
+  Completed: 'Tamamlandı',
+  MarkedAsSuccess: 'Başarılı Sayıldı',
+  Failed: 'Başarısız',
+  WaitingRetry: 'Yeniden Deneme',
+};
+
 // Custom node component - TV görünümü için
-const TVTaskNode = ({ data }: { 
-  data: { 
-    task: TaskItem; 
-    assignment: GroupTaskAssignment; 
-    order: number; 
+const TVTaskNode = ({ data }: {
+  data: {
+    task: TaskItem;
+    assignment: GroupTaskAssignment;
+    order: number;
     level: number;
     status?: string;
     progress?: number;
-  } 
+  }
 }) => {
   const statusColor = getStatusColor(data.status);
   const borderWidth = data.status === 'Running' ? 4 : 2;
-  
+
   return (
-    <div 
-      className="px-4 py-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg min-w-[200px] max-w-[250px] hover:shadow-xl transition-shadow relative"
-      style={{ 
+    <div
+      className="px-4 py-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg min-w-[220px] max-w-[280px] hover:shadow-xl transition-shadow relative"
+      style={{
         borderWidth: `${borderWidth}px`,
         borderColor: statusColor,
         borderStyle: 'solid',
       }}
     >
-      {/* Source handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="source"
-        style={{ 
-          background: statusColor,
-          width: 12,
-          height: 12,
-          border: '2px solid white',
-        }}
-      />
-      
       {/* Target handle */}
       <Handle
         type="target"
         position={Position.Left}
         id="target"
-        style={{ 
+        style={{
           background: statusColor,
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           border: '2px solid white',
         }}
       />
 
-      <div className="flex items-start justify-between mb-2">
-        <div className="text-sm font-semibold text-gray-900 dark:text-white flex-1">
+      <div className="flex items-start justify-between mb-1.5">
+        <div className="text-sm font-bold text-gray-900 dark:text-white flex-1 leading-tight">
           {data.task.name}
         </div>
-        <div 
-          className="ml-2 px-2 py-0.5 rounded text-xs font-medium text-white"
+        <div
+          className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold text-white whitespace-nowrap"
           style={{ backgroundColor: statusColor }}
         >
           #{data.order + 1}
         </div>
       </div>
-      
-      <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-        Seviye: {data.level}
-      </div>
-      
+
       {data.status && (
-        <div className="text-xs font-semibold mb-2" style={{ color: statusColor }}>
-          Durum: {data.status}
+        <div className="text-[11px] font-bold mb-2 uppercase tracking-wider" style={{ color: statusColor }}>
+          {statusLabels[data.status] || data.status}
         </div>
       )}
-      
-      {data.progress !== undefined && (
+
+      {data.progress !== undefined && data.status === 'Running' && (
         <div className="mb-2">
-          <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
-            İlerleme: {data.progress}%
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-[10px] text-gray-500 font-medium">İlerleme</span>
+            <span className="text-[10px] font-bold" style={{ color: statusColor }}>{data.progress}%</span>
           </div>
-          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-            <div 
-              className="h-2 rounded-full transition-all"
-              style={{ 
+          <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
+            <div
+              className="h-1.5 rounded-full transition-all duration-500 shadow-sm"
+              style={{
                 width: `${data.progress}%`,
                 backgroundColor: statusColor,
               }}
@@ -124,24 +113,40 @@ const TVTaskNode = ({ data }: {
           </div>
         </div>
       )}
-      
-      {data.task.description && (
-        <div className="text-xs text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
-          {data.task.description}
+
+      <div className="flex flex-col gap-1 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+          <span className="opacity-70">Seviye:</span>
+          <span className="font-semibold text-gray-700 dark:text-gray-300">{data.level}</span>
         </div>
-      )}
-      
-      {data.assignment.prerequisiteTaskItemIds.length > 0 && (
-        <div className="text-xs text-blue-600 dark:text-blue-400 mt-2 font-medium">
-          📋 {data.assignment.prerequisiteTaskItemIds.length} önşart
-        </div>
-      )}
-      
-      {data.task.sourceType === 'StoredProcedure' && (
-        <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">
-          🔧 SP: {data.task.storedProcedureName}
-        </div>
-      )}
+
+        {data.task.sourceType === 'StoredProcedure' && (
+          <div className="flex items-center gap-1.5 text-[10px] text-purple-600 dark:text-purple-400">
+            <span className="opacity-70">🔧 SP:</span>
+            <span className="font-semibold truncate max-w-[150px]">{data.task.storedProcedureName}</span>
+          </div>
+        )}
+
+        {data.assignment.prerequisiteTaskItemIds.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[10px] text-blue-600 dark:text-blue-400">
+            <span className="opacity-70">📋</span>
+            <span className="font-semibold">{data.assignment.prerequisiteTaskItemIds.length} önşart</span>
+          </div>
+        )}
+      </div>
+
+      {/* Source handle */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="source"
+        style={{
+          background: statusColor,
+          width: 10,
+          height: 10,
+          border: '2px solid white',
+        }}
+      />
     </div>
   );
 };
@@ -169,7 +174,7 @@ export default function TVPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      
+
       // Bugünün başlangıcı ve sonu
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -223,14 +228,14 @@ export default function TVPage() {
   const activeGroups = useMemo(() => {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    
+
     return groupExecutions
       .filter(exec => {
         // Bugün başlamış ve henüz bitmemiş veya bugün bitmiş
         const startDate = new Date(exec.startTime);
         const isToday = startDate >= todayStart;
         if (!isToday) return false;
-        
+
         if (exec.endTime) {
           const endDate = new Date(exec.endTime);
           return endDate >= todayStart;
@@ -258,10 +263,26 @@ export default function TVPage() {
     );
   }*/
 
+  if (loading && activeGroups.length === 0) {
+    return (
+      <div className="flex justify-center items-center h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400 text-xl font-medium">Veriler Yükleniyor...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (activeGroups.length === 0) {
     return (
-      <div className="flex justify-center items-center h-screen text-gray-600 dark:text-gray-400 text-2xl">
-        Bugün çalışan veya çalışmış grup bulunamadı.
+      <div className="flex justify-center items-center h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="text-center p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl">
+          <div className="text-6xl mb-4">📊</div>
+          <div className="text-gray-600 dark:text-gray-400 text-2xl font-semibold">
+            Bugün çalışan veya çalışmış grup bulunamadı.
+          </div>
+        </div>
       </div>
     );
   }
@@ -271,8 +292,8 @@ export default function TVPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {activeGroups.map(groupId => (
           <div key={groupId} className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden" style={{ height: '600px' }}>
-            <TVFlowView 
-              groupId={groupId} 
+            <TVFlowView
+              groupId={groupId}
               groups={groups}
               taskItems={taskItems}
               groupExecutions={groupExecutions}
@@ -286,11 +307,11 @@ export default function TVPage() {
 }
 
 // TV Flow View Component
-function TVFlowView({ 
-  groupId, 
-  groups, 
-  taskItems, 
-  groupExecutions, 
+function TVFlowView({
+  groupId,
+  groups,
+  taskItems,
+  groupExecutions,
   taskExecutions,
 }: {
   groupId: string;
@@ -329,7 +350,7 @@ function TVFlowView({
       const groupTasks = assignmentsData
         .map(a => taskItems.find(t => t.id === a.taskItemId))
         .filter(t => t !== undefined) as TaskItem[];
-      
+
       if (groupTasks.length === 0) {
         setNodes([]);
         setEdges([]);
@@ -355,7 +376,7 @@ function TVFlowView({
       const newNodes: Node[] = [];
       tasksByLevel.forEach((levelAssignments) => {
         levelAssignments.sort((a, b) => a.order - b.order);
-        
+
         levelAssignments.forEach((assignment, indexInLevel) => {
           const task = taskItems.find(t => t.id === assignment.taskItemId);
           if (!task) return;
@@ -404,20 +425,15 @@ function TVFlowView({
               sourceHandle: 'source',
               targetHandle: 'target',
               type: 'smoothstep',
-              animated: true,
-              style: { 
-                stroke: '#3b82f6', 
+              animated: assignment.status === 'Running',
+              style: {
+                stroke: '#3b82f6',
                 strokeWidth: 2,
               },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
                 color: '#3b82f6',
-                width: 20,
-                height: 20,
               },
-              label: 'önşart',
-              labelStyle: { fill: '#3b82f6', fontWeight: 600, fontSize: 12 },
-              labelBgStyle: { fill: 'white', fillOpacity: 0.8 },
             });
           }
         });
@@ -445,14 +461,14 @@ function TVFlowView({
           </h2>
           {groupExec && (
             <div className="text-xs text-blue-100 mt-1">
-              Başlangıç: {new Date(groupExec.startTime).toLocaleString('tr-TR', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
+              Başlangıç: {new Date(groupExec.startTime).toLocaleString('tr-TR', {
+                hour: '2-digit',
+                minute: '2-digit'
               })}
               {groupExec.endTime && (
-                <> | Bitiş: {new Date(groupExec.endTime).toLocaleString('tr-TR', { 
-                  hour: '2-digit', 
-                  minute: '2-digit' 
+                <> | Bitiş: {new Date(groupExec.endTime).toLocaleString('tr-TR', {
+                  hour: '2-digit',
+                  minute: '2-digit'
                 })}</>
               )}
               {groupExec.totalTasks > 0 && (
@@ -491,7 +507,7 @@ function TVFlowView({
           >
             <Background />
             <Controls />
-            <MiniMap 
+            <MiniMap
               nodeColor={(node) => {
                 const status = (node.data as any)?.status;
                 return getStatusColor(status);

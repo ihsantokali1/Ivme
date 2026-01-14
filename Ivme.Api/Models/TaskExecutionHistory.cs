@@ -1,4 +1,4 @@
-namespace Ivme.Api.Models;
+﻿namespace Ivme.Api.Models;
 
 /// <summary>
 /// Task çalışma geçmişi - Her task çalışması için bir kayıt
@@ -9,6 +9,8 @@ public class TaskExecutionHistory
     public string TaskItemId { get; set; } = string.Empty;
     public string? GroupId { get; set; } // Hangi grup içinde çalıştığı (geriye uyumluluk için)
     public string? GroupExecutionId { get; set; } // Hangi grup execution'ı içinde çalıştığı
+    public string? FlowItemId { get; set; } // Hangi akış içinde çalıştığı
+    public string? FlowItemExecutionId { get; set; } // Hangi akış execution'ı içinde çalıştığı
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public TimeSpan? Duration => EndTime.HasValue ? EndTime.Value - StartTime : null;

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Ivme.Api.Data;
 using Ivme.Api.Models;
+using System.Text.RegularExpressions;
 
 namespace Ivme.Api.Services;
 
@@ -21,14 +22,66 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
         _dataService = dataService;
     }
 
-    public async Task<List<StoredProcedureInfo>> DiscoverStoredProceduresAsync()
+    public async Task<List<string>> GetAllDatabasesAsync()
+    {
+        if (!_dbConfig.UseDatabase || string.IsNullOrEmpty(_dbConfig.Server))
+        {
+            return new List<string>();
+        }
+
+        var connectionString = $"Server={_dbConfig.Server};Database=master;User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
+        var databases = new List<string>();
+
+        try
+        {
+            using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            var query = "SELECT name FROM sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb') AND state_desc = 'ONLINE' ORDER BY name";
+            using var command = new SqlCommand(query, connection);
+            using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                databases.Add(reader["name"].ToString() ?? "");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SP Discovery] Error listing databases: {ex.Message}");
+        }
+
+        return databases;
+    }
+
+    public async Task<List<StoredProcedureInfo>> DiscoverStoredProceduresAsync(List<string>? targetDatabases = null)
     {
         if (!_dbConfig.UseDatabase || string.IsNullOrEmpty(_dbConfig.Server))
         {
             return new List<StoredProcedureInfo>();
         }
 
-        var connectionString = $"Server={_dbConfig.Server};Database={_dbConfig.Database};User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
+        // Eğer veritabanı listesi verilmemişse ve DB'de kayıtlı seçili DB varsa onları alabiliriz
+        // Ancak bu metodun parametre alması daha esnek. Sync metodunda DB'dekileri alacağız.
+        if (targetDatabases == null || !targetDatabases.Any())
+        {
+            targetDatabases = new List<string> { _dbConfig.Database };
+        }
+
+        var procedures = new List<StoredProcedureInfo>();
+
+        foreach (var dbName in targetDatabases)
+        {
+            var dbProcedures = await DiscoverProceduresInDatabaseAsync(dbName);
+            procedures.AddRange(dbProcedures);
+        }
+
+        return procedures;
+    }
+
+    private async Task<List<StoredProcedureInfo>> DiscoverProceduresInDatabaseAsync(string databaseName)
+    {
+        var connectionString = $"Server={_dbConfig.Server};Database={databaseName};User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
         var procedures = new List<StoredProcedureInfo>();
 
         try
@@ -36,7 +89,6 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
             using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
 
-            // SP'leri listele
             var query = @"
                 SELECT 
                     SCHEMA_NAME(schema_id) AS SchemaName,
@@ -48,7 +100,7 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                 ORDER BY SCHEMA_NAME(schema_id), name";
 
             using var command = new SqlCommand(query, connection);
-                using var reader = await command.ExecuteReaderAsync();
+            using var reader = await command.ExecuteReaderAsync();
 
             while (await reader.ReadAsync())
             {
@@ -58,34 +110,40 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                 var modifiedDate = (DateTime)reader["ModifiedDate"];
 
                 // Parametreleri al
-                var parameters = await GetStoredProcedureParametersAsync(schema, procedureName);
+                var parameters = await GetStoredProcedureParametersAsync(databaseName, schema, procedureName);
+                
+                // Tablo kullanımını al
+                var tableUsage = await GetTableUsageSummaryAsync(databaseName, schema, procedureName);
 
                 procedures.Add(new StoredProcedureInfo
                 {
                     Name = procedureName,
                     Schema = schema,
+                    Database = databaseName,
                     CreatedDate = createdDate,
                     ModifiedDate = modifiedDate,
-                    Parameters = parameters
+                    Parameters = parameters,
+                    TableUsageSummary = tableUsage.Summary,
+                    TableDependencies = tableUsage.Dependencies
                 });
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[SP Discovery] Error discovering stored procedures: {ex.Message}");
+            Console.WriteLine($"[SP Discovery] Error discovering stored procedures in {databaseName}: {ex.Message}");
         }
 
         return procedures;
     }
 
-    public async Task<List<StoredProcedureParameterInfo>> GetStoredProcedureParametersAsync(string schema, string procedureName)
+    public async Task<List<StoredProcedureParameterInfo>> GetStoredProcedureParametersAsync(string database, string schema, string procedureName)
     {
         if (!_dbConfig.UseDatabase || string.IsNullOrEmpty(_dbConfig.Server))
         {
             return new List<StoredProcedureParameterInfo>();
         }
 
-        var connectionString = $"Server={_dbConfig.Server};Database={_dbConfig.Database};User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
+        var connectionString = $"Server={_dbConfig.Server};Database={database};User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
         var parameters = new List<StoredProcedureParameterInfo>();
 
         try
@@ -125,7 +183,6 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                 var isNullable = reader["IsNullable"] != DBNull.Value ? (bool)reader["IsNullable"] : true;
                 var order = (int)reader["Order"];
 
-                // Output parametreleri hariç tut (genellikle task'lar için gerekmez)
                 if (!isOutput)
                 {
                     parameters.Add(new StoredProcedureParameterInfo
@@ -143,10 +200,125 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[SP Discovery] Error getting parameters for {schema}.{procedureName}: {ex.Message}");
+            Console.WriteLine($"[SP Discovery] Error getting parameters for {database}.{schema}.{procedureName}: {ex.Message}");
         }
 
         return parameters;
+    }
+
+    private async Task<(string Summary, List<StoredProcedureTableDependency> Dependencies)> GetTableUsageSummaryAsync(string database, string schema, string procedureName)
+    {
+        var connectionString = $"Server={_dbConfig.Server};Database={database};User Id={_dbConfig.UserId};Password={_dbConfig.Password};TrustServerCertificate=True;";
+        var usageMap = new Dictionary<string, HashSet<string>>();
+        string spDefinition = string.Empty;
+
+        try
+        {
+            using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+
+            // 1. SP Tanımını (Source Code) çek
+            var defQuery = @"
+                SELECT m.definition 
+                FROM sys.sql_modules m
+                INNER JOIN sys.procedures p ON m.object_id = p.object_id
+                INNER JOIN sys.schemas s ON p.schema_id = s.schema_id
+                WHERE s.name = @Schema AND p.name = @ProcedureName";
+            
+            using (var defCommand = new SqlCommand(defQuery, connection))
+            {
+                defCommand.Parameters.AddWithValue("@Schema", schema);
+                defCommand.Parameters.AddWithValue("@ProcedureName", procedureName);
+                spDefinition = (await defCommand.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            }
+
+            // 2. Bağımlı tabloları ve temel kullanım (Select vs Update) bilgisini çek
+            var query = @"
+                SELECT 
+                    ISNULL(referenced_schema_name,'dbo') + '.' + referenced_entity_name as TableName,
+                    is_selected,
+                    is_updated
+                FROM sys.dm_sql_referenced_entities(@ProcedureFullName, 'OBJECT')
+                WHERE referenced_class_desc = 'OBJECT_OR_COLUMN' 
+                  AND is_ambiguous = 0";
+
+            using var command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("@ProcedureFullName", $"{schema}.{procedureName}");
+
+            using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                var tableName = reader["TableName"].ToString() ?? "";
+                var isSelected = (bool)reader["is_selected"];
+                var isUpdated = (bool)reader["is_updated"];
+
+                if (!usageMap.ContainsKey(tableName))
+                    usageMap[tableName] = new HashSet<string>();
+
+                if (isSelected) usageMap[tableName].Add("Select");
+                
+                if (isUpdated && !string.IsNullOrEmpty(spDefinition))
+                {
+                    // Spesifik operatörleri ayıkla (Regex ile)
+                    var tableRef = tableName.Split('.').Last(); // Tablo ismini al (şemasız)
+                    
+                    // Regex patterns: Operatör + (isteğe bağlı boşluklar/hintler) + tablo ismi
+                    bool foundAny = false;
+                    
+                    if (Regex.IsMatch(spDefinition, $@"\bINSERT\s+(?:INTO\s+)?(?:\w+\.)?\b{tableRef}\b", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+                    {
+                        usageMap[tableName].Add("Insert");
+                        foundAny = true;
+                    }
+                    
+                    if (Regex.IsMatch(spDefinition, $@"\bUPDATE\s+(?:\w+\.)?\b{tableRef}\b", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+                    {
+                        usageMap[tableName].Add("Update");
+                        foundAny = true;
+                    }
+
+                    if (Regex.IsMatch(spDefinition, $@"\bDELETE\s+(?:FROM\s+)?(?:\w+\.)?\b{tableRef}\b", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+                    {
+                        usageMap[tableName].Add("Delete");
+                        foundAny = true;
+                    }
+                    
+                    if (Regex.IsMatch(spDefinition, $@"\bTRUNCATE\s+TABLE\s+(?:\w+\.)?\b{tableRef}\b", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+                    {
+                        usageMap[tableName].Add("Truncate");
+                        foundAny = true;
+                    }
+
+                    // Eğer spesifik bir şey bulunamadıysa ama is_updated ise generic "Update" ekle
+                    if (!foundAny)
+                    {
+                        usageMap[tableName].Add("Update");
+                    }
+                }
+                else if (isUpdated)
+                {
+                    usageMap[tableName].Add("Update");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SP Discovery] Error getting table usage for {database}.{schema}.{procedureName}: {ex.Message}");
+            return ("Kullanılan tablo bilgisi alınamadı.", new List<StoredProcedureTableDependency>());
+        }
+
+        var dependencies = usageMap.Select(kvp => new StoredProcedureTableDependency
+        {
+            TableName = kvp.Key,
+            UsageTypes = kvp.Value.ToList()
+        }).ToList();
+
+        if (!dependencies.Any()) return ("Bağımlı tablo bulunamadı.", new List<StoredProcedureTableDependency>());
+
+        var summary = "Kullanılan Tablolar: " + string.Join(", ", dependencies.Select(d => $"{d.TableName} ({string.Join("/", d.UsageTypes)})"));
+        
+        return (summary, dependencies);
     }
 
     public async Task SyncStoredProceduresToTaskItemsAsync()
@@ -158,7 +330,19 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
 
         try
         {
-            var discoveredProcedures = await DiscoverStoredProceduresAsync();
+            // Seçili keşif veritabanlarını getir
+            var targetDatabases = await _dbContext.DiscoveryDatabases
+                .Where(d => d.IsSelected)
+                .Select(d => d.DatabaseName)
+                .ToListAsync();
+
+            if (!targetDatabases.Any())
+            {
+                // Eğer hiç seçili DB yoksa, ana config'deki DB'yi kullan
+                targetDatabases.Add(_dbConfig.Database);
+            }
+
+            var discoveredProcedures = await DiscoverStoredProceduresAsync(targetDatabases);
             var existingTaskItems = await _dbContext.TaskItems
                 .Where(t => t.SourceType.HasValue && t.SourceType.Value == TaskSourceType.StoredProcedure)
                 .Include(t => t.Parameters)
@@ -166,39 +350,37 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
 
             var now = DateTime.UtcNow;
 
-            // Keşfedilen SP'leri işle
             foreach (var sp in discoveredProcedures)
             {
-                var spFullName = $"{sp.Schema}.{sp.Name}";
+                var spFullName = $"{sp.Database}.{sp.Schema}.{sp.Name}";
                 var existingTask = existingTaskItems.FirstOrDefault(t => 
+                    t.StoredProcedureDatabase == sp.Database &&
                     t.StoredProcedureName == sp.Name && 
                     t.StoredProcedureSchema == sp.Schema);
 
                 if (existingTask == null)
                 {
-                    // Yeni SP - TaskItem oluştur
                     var newTask = new TaskItem
                     {
                         Id = Guid.NewGuid().ToString(),
                         Name = sp.Name,
-                        Description = $"Stored Procedure: {spFullName}",
+                        Description = string.IsNullOrEmpty(sp.TableUsageSummary) 
+                            ? $"Stored Procedure: {spFullName}"
+                            : $"Stored Procedure: {spFullName} | {sp.TableUsageSummary}",
                         SourceType = TaskSourceType.StoredProcedure,
                         StoredProcedureName = sp.Name,
                         StoredProcedureSchema = sp.Schema,
+                        StoredProcedureDatabase = sp.Database,
                         LastDiscoveredAt = now,
                         IsActive = true,
-                        RetryIntervalMinutes = 60, // Varsayılan değerler
+                        RetryIntervalMinutes = 60,
                         RetryDelayMinutes = 60,
                         CreatedAt = now,
                         UpdatedAt = now
                     };
 
-                    // Parametreleri ekle
                     foreach (var param in sp.Parameters)
                     {
-                        // Parametre zorunlu mu? 
-                        // - Varsayılan değeri yoksa VE nullable değilse zorunlu
-                        // - Varsayılan değeri varsa zorunlu değil
                         bool isRequired = !param.HasDefaultValue && !param.IsNullable;
                         
                         newTask.Parameters.Add(new TaskParameter
@@ -217,20 +399,60 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                     }
 
                     _dbContext.TaskItems.Add(newTask);
+                    
+                    // Bağımlılıkları kaydet
+                    foreach (var dep in sp.TableDependencies)
+                    {
+                        _dbContext.TaskTableDependencies.Add(new TaskTableDependency
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            TaskItemId = newTask.Id,
+                            DatabaseName = sp.Database,
+                            SchemaName = sp.Schema,
+                            ProcedureName = sp.Name,
+                            TableName = dep.TableName,
+                            UsageType = string.Join("/", dep.UsageTypes),
+                            CreatedAt = now
+                        });
+                    }
+                    
                     Console.WriteLine($"[SP Discovery] Created new TaskItem for SP: {spFullName}");
                 }
                 else
                 {
-                    // Mevcut SP - güncelle
                     existingTask.LastDiscoveredAt = now;
                     existingTask.IsActive = true;
                     existingTask.UpdatedAt = now;
+                    
+                    // Açıklamayı güncelle (tablo bilgileri değişmiş olabilir)
+                    existingTask.Description = string.IsNullOrEmpty(sp.TableUsageSummary) 
+                        ? $"Stored Procedure: {spFullName}"
+                        : $"Stored Procedure: {spFullName} | {sp.TableUsageSummary}";
 
-                    // Parametreleri senkronize et
+                    // Bağımlılıkları güncelle (eskileri silip yenileri ekleyerek)
+                    var existingDeps = await _dbContext.TaskTableDependencies
+                        .Where(d => d.TaskItemId == existingTask.Id)
+                        .ToListAsync();
+                    _dbContext.TaskTableDependencies.RemoveRange(existingDeps);
+
+                    foreach (var dep in sp.TableDependencies)
+                    {
+                        _dbContext.TaskTableDependencies.Add(new TaskTableDependency
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            TaskItemId = existingTask.Id,
+                            DatabaseName = sp.Database,
+                            SchemaName = sp.Schema,
+                            ProcedureName = sp.Name,
+                            TableName = dep.TableName,
+                            UsageType = string.Join("/", dep.UsageTypes),
+                            CreatedAt = now
+                        });
+                    }
+
                     var existingParamNames = existingTask.Parameters.Select(p => p.ParameterName).ToHashSet();
                     var discoveredParamNames = sp.Parameters.Select(p => p.Name).ToHashSet();
 
-                    // Yeni parametreleri ekle
                     foreach (var param in sp.Parameters)
                     {
                         if (!existingParamNames.Contains(param.Name))
@@ -251,7 +473,6 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                         }
                         else
                         {
-                            // Mevcut parametreyi güncelle
                             var existingParam = existingTask.Parameters.FirstOrDefault(p => p.ParameterName == param.Name);
                             if (existingParam != null)
                             {
@@ -264,7 +485,6 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                         }
                     }
 
-                    // Silinen parametreleri kaldır (SP'den kaldırılmışsa)
                     var paramsToRemove = existingTask.Parameters
                         .Where(p => !discoveredParamNames.Contains(p.ParameterName))
                         .ToList();
@@ -277,21 +497,20 @@ public class StoredProcedureDiscoveryService : IStoredProcedureDiscoveryService
                 }
             }
 
-            // Artık mevcut olmayan SP'leri pasifleştir
-            var discoveredSpNames = discoveredProcedures
-                .Select(sp => new { sp.Schema, sp.Name })
+            var discoveredSpKeys = discoveredProcedures
+                .Select(sp => new { sp.Database, sp.Schema, sp.Name })
                 .ToHashSet();
 
             foreach (var task in existingTaskItems)
             {
-                if (task.StoredProcedureSchema != null && task.StoredProcedureName != null)
+                if (task.StoredProcedureDatabase != null && task.StoredProcedureSchema != null && task.StoredProcedureName != null)
                 {
-                    var spKey = new { Schema = task.StoredProcedureSchema, Name = task.StoredProcedureName };
-                    if (!discoveredSpNames.Contains(spKey))
+                    var spKey = new { Database = task.StoredProcedureDatabase, Schema = task.StoredProcedureSchema, Name = task.StoredProcedureName };
+                    if (!discoveredSpKeys.Contains(spKey))
                     {
                         task.IsActive = false;
                         task.UpdatedAt = now;
-                        Console.WriteLine($"[SP Discovery] Deactivated TaskItem for removed SP: {task.StoredProcedureSchema}.{task.StoredProcedureName}");
+                        Console.WriteLine($"[SP Discovery] Deactivated TaskItem for removed SP: {task.StoredProcedureDatabase}.{task.StoredProcedureSchema}.{task.StoredProcedureName}");
                     }
                 }
             }

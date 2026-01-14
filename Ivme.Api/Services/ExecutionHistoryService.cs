@@ -1,6 +1,7 @@
-﻿using Ivme.Api.Models;
-using Ivme.Api.Data;
+﻿using Ivme.Api.Data;
+using Ivme.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using static System.Reflection.Metadata.BlobBuilder;
 
 namespace Ivme.Api.Services;
 
@@ -30,7 +31,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
     // Public metod - TaskManagementService'ten erişim için
     public TaskDbContext? GetDbContextPublic() => GetDbContext();
 
-    public async Task<TaskExecutionHistory> StartTaskExecutionAsync(string taskItemId, string? groupId = null, string? groupExecutionId = null, Dictionary<string, string?>? taskParameterValues = null, string? triggeredBy = null)
+    public async Task<TaskExecutionHistory> StartTaskExecutionAsync(string taskItemId, string? groupId = null, string? groupExecutionId = null, string? flowItemId = null, string? flowItemExecutionId = null, Dictionary<string, string?>? taskParameterValues = null, string? triggeredBy = null)
     {
         var dbContext = GetDbContext();
         if (dbContext == null)
@@ -42,6 +43,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 TaskItemId = taskItemId,
                 GroupId = groupId,
                 GroupExecutionId = groupExecutionId,
+                FlowItemId = flowItemId,
+                FlowItemExecutionId = flowItemExecutionId,
                 StartTime = DateTime.Now,
                 FinalStatus = TaskItemStatus.Running,
                 RetryCount = 0, // JSON modunda retry sayısını takip edemeyiz
@@ -157,6 +160,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
             TaskItemId = taskItemId,
             GroupId = groupId,
             GroupExecutionId = groupExecutionId,
+            FlowItemId = flowItemId,
+            FlowItemExecutionId = flowItemExecutionId,
             StartTime = DateTime.Now,
             FinalStatus = TaskItemStatus.Running,
             RetryCount = retryCount,
@@ -338,7 +343,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
         }
     }
 
-    public async Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null)
+    public async Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null)
     {
         var dbContext = GetDbContext();
         if (dbContext == null)
@@ -349,7 +354,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 GroupId = groupId,
                 StartTime = DateTime.Now,
                 TriggeredBy = triggeredBy,
-                FlowExecutionId = flowExecutionId
+                FlowItemId = flowItemId,
+                FlowItemExecutionId = flowItemExecutionId
             };
             _activeGroupExecutions[groupId] = history;
             return history;
@@ -360,7 +366,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
             GroupId = groupId,
                 StartTime = DateTime.Now,
             TriggeredBy = triggeredBy,
-            FlowExecutionId = flowExecutionId
+            FlowItemId = flowItemId,
+            FlowItemExecutionId = flowItemExecutionId
         };
 
         dbContext.GroupExecutionHistories.Add(execution);
@@ -469,7 +476,13 @@ public class ExecutionHistoryService : IExecutionHistoryService
         var dbContext = GetDbContext();
         if (dbContext == null)
         {
-            return new List<FlowExecutionHistory>();
+            // JSON modunda - sadece aktif olanları döndür
+            var activeHistories = _activeFlowExecutions.Values.ToList();
+            if (!string.IsNullOrEmpty(flowItemId))
+            {
+                activeHistories = activeHistories.Where(h => h.FlowItemId == flowItemId).ToList();
+            }
+            return activeHistories;
         }
 
         var query = dbContext.FlowExecutionHistories.AsQueryable();
@@ -558,9 +571,9 @@ public class ExecutionHistoryService : IExecutionHistoryService
             await dbContextForComplete.SaveChangesAsync();
 
             // Eğer akış içindeyse FlowGroupAssignment'ı da güncelle
-            if (!string.IsNullOrEmpty(executionDbComplete.FlowExecutionId))
+            if (!string.IsNullOrEmpty(executionDbComplete.FlowItemExecutionId))
             {
-                var flowExecution = await dbContextForComplete.FlowExecutionHistories.FindAsync(executionDbComplete.FlowExecutionId);
+                var flowExecution = await dbContextForComplete.FlowExecutionHistories.FindAsync(executionDbComplete.FlowItemExecutionId);
                 if (flowExecution != null)
                 {
                     var assignment = await dbContextForComplete.FlowGroupAssignments
@@ -768,7 +781,6 @@ public class ExecutionHistoryService : IExecutionHistoryService
         {
             return result;
         }
-
         // Tüm grupları al
         var data = await _dataService.GetDataAsync();
         var groups = data.Groups;
@@ -778,10 +790,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
         if (dbContext == null)
         {
             // JSON modunda - aktif execution'lardan bugün başlamış olanları al
-            // Her grup için bugün başlamış en son group execution'ı bul
             foreach (var group in groups)
             {
-                // Bugün başlamış en son group execution'ı bul (aktif olanlar)
                 var latestGroupExecution = _activeGroupExecutions.Values
                     .Where(e => e.GroupId == group.Id && e.StartTime.Date == todayStart)
                     .OrderByDescending(e => e.StartTime)
@@ -789,17 +799,14 @@ public class ExecutionHistoryService : IExecutionHistoryService
 
                 if (latestGroupExecution == null)
                 {
-                    // Bugün hiç başlamadı, tüm task'lar için statü boş (ekleme yapmıyoruz)
                     continue;
                 }
 
-                // Bu group execution'dan sonraki task execution'larını al
                 var taskExecutions = _activeTaskExecutions.Values
                     .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
                     .OrderByDescending(e => e.StartTime)
                     .ToList();
 
-                // Her task için en son execution'ın statüsünü al
                 var taskExecutionsByTaskId = taskExecutions
                     .GroupBy(e => e.TaskItemId)
                     .ToDictionary(g => g.Key, g => g.First());
@@ -813,11 +820,9 @@ public class ExecutionHistoryService : IExecutionHistoryService
             return result;
         }
 
-        // Veritabanı modunda
-        // Her grup için bugün başlamış en son group execution'ı bul
+        // Veritabanı modunda - her grup için bugün başlamış en son group execution'ı bul
         foreach (var group in groups)
         {
-            // Bugün başlamış en son group execution'ı bul
             var latestGroupExecution = await dbContext.GroupExecutionHistories
                 .Where(e => e.GroupId == group.Id && e.StartTime >= todayStart && e.StartTime < todayEnd)
                 .OrderByDescending(e => e.StartTime)
@@ -825,20 +830,15 @@ public class ExecutionHistoryService : IExecutionHistoryService
 
             if (latestGroupExecution == null)
             {
-                // Bugün hiç başlamadı, tüm task'lar için statü boş (ekleme yapmıyoruz)
                 continue;
             }
 
-            // Bu group execution'dan sonraki task execution'larını al
-            // ÖNEMLİ: EndTime'a göre sırala (en son güncellenen execution'ı almak için)
-            // EndTime null ise StartTime'a göre sırala
             var taskExecutions = await dbContext.TaskExecutionHistories
                 .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
                 .OrderByDescending(e => e.EndTime ?? e.StartTime)
                 .ThenByDescending(e => e.StartTime)
                 .ToListAsync();
 
-            // Her task için en son execution'ın statüsünü al
             var taskExecutionsByTaskId = taskExecutions
                 .GroupBy(e => e.TaskItemId)
                 .ToDictionary(g => g.Key, g => g.First());
@@ -933,5 +933,207 @@ public class ExecutionHistoryService : IExecutionHistoryService
 
         return result;
     }
+
+    public async Task<Dictionary<string, string>> GetTodayFlowStatusesAsync()
+    {
+        var dbContext = GetDbContext();
+        var result = new Dictionary<string, string>();
+        
+        if (_dataService == null)
+        {
+            return result;
+        }
+
+        var data = await _dataService.GetDataAsync();
+        var flows = data.FlowItems;
+        var todayStart = DateTime.Now.Date;
+        var todayEnd = todayStart.AddDays(1);
+
+        if (dbContext == null)
+        {
+            // JSON modunda
+            foreach (var flow in flows)
+            {
+                var latestFlowExecution = _activeFlowExecutions.Values
+                    .Where(e => e.FlowItemId == flow.Id && e.StartTime.Date == todayStart)
+                    .OrderByDescending(e => e.StartTime)
+                    .FirstOrDefault();
+
+                if (latestFlowExecution != null)
+                {
+                    result[flow.Id] = latestFlowExecution.Status;
+                }
+            }
+            return result;
+        }
+
+        // Veritabanı modunda
+        foreach (var flow in flows)
+        {
+            var latestFlowExecution = await dbContext.FlowExecutionHistories
+                .Where(e => e.FlowItemId == flow.Id && e.StartTime >= todayStart && e.StartTime < todayEnd)
+                .OrderByDescending(e => e.StartTime)
+                .FirstOrDefaultAsync();
+
+            if (latestFlowExecution != null)
+            {
+                result[flow.Id] = latestFlowExecution.Status;
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<DashboardMetrics> GetDashboardMetricsAsync()
+    {
+        var dbContext = GetDbContext();
+        var result = new DashboardMetrics();
+
+        if (_dataService == null)
+        {
+            return result;
+        }
+
+        var todayStart = DateTime.Now.Date;
+        var todayEnd = todayStart.AddDays(1);
+
+        //if (dbContext == null)
+        //{
+        //    // In-memory/json mode
+        //    result.TotalFlowsToday = _activeFlowExecutions.Values.Count(e => e.StartTime.Date == todayStart);
+        //    result.SuccessfulFlowsToday = _activeFlowExecutions.Values.Count(e => e.StartTime.Date == todayStart && e.Status == "Completed");
+        //    result.FlowSuccessRate = result.TotalFlowsToday != 0 ? (double)result.SuccessfulFlowsToday / result.TotalFlowsToday : 0;
+
+        //    result.TotalGroupsToday = _activeGroupExecutions.Values.Count(e => e.StartTime.Date == todayStart);
+        //    result.SuccessfulGroupsToday = _activeGroupExecutions.Values.Count(e => e.StartTime.Date == todayStart && e.TotalTasks > 0 && e.CompletedTasks >= e.TotalTasks);
+        //    result.GroupSuccessRate = result.TotalGroupsToday != 0 ? (double)result.SuccessfulGroupsToday / result.TotalGroupsToday : 0;
+
+        //    result.TotalTasksToday = _activeTaskExecutions.Values.Count(e => e.StartTime.Date == todayStart);
+        //    result.SuccessfulTasksToday = _activeTaskExecutions.Values.Count(e => e.StartTime.Date == todayStart && e.FinalStatus == TaskItemStatus.Completed);
+        //    result.TaskSuccessRate = result.TotalTasksToday != 0 ? (double)result.SuccessfulTasksToday / result.TotalTasksToday : 0;
+
+        //    result.ActiveFlows = _activeFlowExecutions.Values.Count(e => e.StartTime.Date == todayStart && e.Status == "Running");
+        //    result.ActiveGroups = _activeGroupExecutions.Values.Count(e => e.StartTime.Date == todayStart && (e.EndTime == null || e.CompletedTasks < e.TotalTasks));
+        //    result.ActiveTasks = _activeTaskExecutions.Values.Count(e => e.StartTime.Date == todayStart && e.FinalStatus == TaskItemStatus.Running);
+
+        //    result.FailedLastAttemptToday = _activeTaskExecutions.Values
+        //        .Where(e => e.StartTime.Date == todayStart && e.FinalStatus == TaskItemStatus.Failed)
+        //        .OrderByDescending(e => e.StartTime)
+        //        .Select(e => new FailedMetricItem
+        //        {
+        //            Id = e.Id,
+        //            Name = e.TaskItemId,
+        //            Type = "Task",
+        //            ErrorMessage = e.ErrorMessage ?? string.Empty,
+        //            LastAttemptTime = e.StartTime,
+        //            Status = e.FinalStatus.ToString()
+        //        })
+        //        .Take(10)
+        //        .ToList();
+
+        //    return result;
+        //}
+
+        // Database mode: query directly with date filters to limit scanned rows
+        result.TotalFlowsToday = await dbContext.FlowExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd)
+            .CountAsync();
+
+        result.SuccessfulFlowsToday = await dbContext.FlowExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.Status == "Completed")
+            .CountAsync();
+
+        result.FlowSuccessRate = result.TotalFlowsToday != 0
+            ? (double)result.SuccessfulFlowsToday / result.TotalFlowsToday
+            : 0;
+
+        result.TotalGroupsToday = await dbContext.GroupExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd)
+            .CountAsync();
+
+        result.SuccessfulGroupsToday = await dbContext.GroupExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.TotalTasks > 0 && e.CompletedTasks >= e.TotalTasks)
+            .CountAsync();
+
+        result.GroupSuccessRate = result.TotalGroupsToday != 0
+            ? (double)result.SuccessfulGroupsToday / result.TotalGroupsToday
+            : 0;
+
+        result.TotalTasksToday = await dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd)
+            .CountAsync();
+
+        result.SuccessfulTasksToday = await dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.FinalStatus == TaskItemStatus.Completed)
+            .CountAsync();
+
+        result.TaskSuccessRate = result.TotalTasksToday != 0
+            ? (double)result.SuccessfulTasksToday / result.TotalTasksToday
+            : 0;
+
+        result.ActiveFlows = await dbContext.FlowExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.Status == "Running")
+            .CountAsync();
+
+        result.ActiveGroups = await dbContext.GroupExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && (e.EndTime == null || e.CompletedTasks < e.TotalTasks))
+            .CountAsync();
+
+        result.ActiveTasks = await dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.FinalStatus == TaskItemStatus.Running)
+            .CountAsync();
+
+        var failedTasks = await dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.FinalStatus == TaskItemStatus.Failed)
+            .OrderByDescending(e => e.StartTime)
+            .Select(e => new FailedMetricItem {
+                Id = e.Id,
+                Name = dbContext.TaskItems.Where(t => t.Id == e.TaskItemId).Select(t => t.Name).FirstOrDefault() ?? e.TaskItemId,
+                Type = "Task",
+                ErrorMessage = e.ErrorMessage ?? string.Empty,
+                LastAttemptTime = e.StartTime,
+                Status = e.FinalStatus.ToString()
+            })
+            .Take(10)
+            .ToListAsync();
+
+        var failedGroups = await dbContext.GroupExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.FailedTasks > 0)
+            .OrderByDescending(e => e.StartTime)
+            .Select(e => new FailedMetricItem {
+                Id = e.Id,
+                Name = dbContext.Groups.Where(g => g.Id == e.GroupId).Select(g => g.Name).FirstOrDefault() ?? e.GroupId,
+                Type = "Group",
+                ErrorMessage = string.Empty,
+                LastAttemptTime = e.StartTime,
+                Status = null
+            })
+            .Take(10)
+            .ToListAsync();
+
+        var failedFlows = await dbContext.FlowExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd && e.Status == "Failed")
+            .OrderByDescending(e => e.StartTime)
+            .Select(e => new FailedMetricItem {
+                Id = e.Id,
+                Name = dbContext.FlowItems.Where(f => f.Id == e.FlowItemId).Select(f => f.Name).FirstOrDefault() ?? e.FlowItemId,
+                Type = "Flow",
+                ErrorMessage = string.Empty,
+                LastAttemptTime = e.StartTime,
+                Status = e.Status
+            })
+            .Take(10)
+            .ToListAsync();
+
+        var combined = failedTasks.Concat(failedGroups).Concat(failedFlows)
+            .OrderByDescending(f => f.LastAttemptTime)
+            .Take(10)
+            .ToList();
+
+        result.FailedLastAttemptToday = combined;
+
+        return result;
+    }
+
 }
 

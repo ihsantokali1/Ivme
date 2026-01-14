@@ -27,6 +27,7 @@ export type TaskItem = {
   sourceType?: 'Manual' | 'StoredProcedure';
   storedProcedureName?: string;
   storedProcedureSchema?: string;
+  storedProcedureDatabase?: string;
   lastDiscoveredAt?: string;
   isActive?: boolean;
   parameters?: TaskParameter[]; // SP parametreleri
@@ -109,6 +110,8 @@ export type TaskExecutionHistory = {
   progress: number;
   taskParameterValues?: Record<string, string | null>; // Task çalıştırılırken kullanılan parametre değerleri
   triggeredBy?: string;
+  flowItemId?: string;
+  flowItemExecutionId?: string;
   createdAt: string;
 };
 
@@ -123,9 +126,66 @@ export type GroupExecutionHistory = {
   failedTasks: number;
   totalErrors: number;
   triggeredBy?: string;
+  flowItemId?: string;
+  flowItemExecutionId?: string;
   createdAt: string;
 };
 
+export type FlowExecutionHistory = {
+  id: string;
+  flowItemId: string;
+  startTime: string;
+  endTime?: string;
+  status: string;
+  errorCount: number;
+  triggeredBy?: string;
+  createdAt: string;
+};
+export type FailedMetricItem = {
+  Id: string;
+  Name: string;
+  Type: string;
+  ErrorMessage: string;
+  LastAttemptTime: string;
+  Status?: string;
+};
+
+export type DashboardMetrics = {
+  TotalFlowsToday: number;
+  SuccessfulFlowsToday: number;
+  FlowSuccessRate: number;
+
+  TotalGroupsToday: number;
+  SuccessfulGroupsToday: number;
+  GroupSuccessRate: number;
+
+  TotalTasksToday: number;
+  SuccessfulTasksToday: number;
+  TaskSuccessRate: number;
+
+  ActiveFlows: number;
+  ActiveGroups: number;
+  ActiveTasks: number;
+
+  FailedLastAttemptToday: FailedMetricItem[];
+};
+export type DiscoveryDatabase = {
+  id: string;
+  databaseName: string;
+  isSelected: boolean;
+  createdAt: string;
+};
+
+export type TaskTableDependency = {
+  id: string;
+  taskItemId: string;
+  databaseName: string;
+  schemaName: string;
+  procedureName: string;
+  tableName: string;
+  usageType: string;
+  createdAt: string;
+};
 
 const API_BASE_URL = 'http://localhost:5041/api';
 const TOKEN_KEY = 'ivme_auth_token';
@@ -347,6 +407,8 @@ export const taskItemsApi = {
     fetchApi<{ message: string }>('/tasks/check-statuses', {
       method: 'POST',
     }),
+  getTableDependencies: (taskItemId?: string) =>
+    fetchApi<TaskTableDependency[]>(`/tasks/table-dependencies${taskItemId ? `?taskItemId=${taskItemId}` : ''}`),
   assignToGroup: (taskItemId: string, groupId: string) =>
     fetchApi<{ message: string }>(`/tasks/${taskItemId}/assign/${groupId}`, {
       method: 'POST',
@@ -459,10 +521,60 @@ export const executionHistoryApi = {
     fetchApi<TaskExecutionHistory>(`/executionhistory/tasks/${id}`),
   getGroupHistory: (id: string) =>
     fetchApi<GroupExecutionHistory>(`/executionhistory/groups/${id}`),
+  getFlowHistories: (params?: {
+    flowItemId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.flowItemId) queryParams.append('flowItemId', params.flowItemId);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+    return fetchApi<FlowExecutionHistory[]>(`/executionhistory/flows?${queryParams.toString()}`);
+  },
+  getFlowHistory: (id: string) =>
+    fetchApi<FlowExecutionHistory>(`/executionhistory/flows/${id}`),
   getTodayStatuses: () =>
     fetchApi<Record<string, string>>('/executionhistory/today-statuses'),
   getTodayStatusesWithErrors: () =>
     fetchApi<Record<string, { status: string; errorMessage?: string }>>('/executionhistory/today-statuses-with-errors'),
+  getTodayFlowStatuses: () =>
+    fetchApi<Record<string, string>>('/executionhistory/today-flow-statuses'),
+  getDashboardMetrics: async () => {
+    const raw = await fetchApi<any>('/executionhistory/metrics');
+    if (!raw) return undefined as DashboardMetrics;
+
+    const mapItem = (it: any): FailedMetricItem => ({
+      Id: it.id ?? it.Id,
+      Name: it.name ?? it.Name,
+      Type: it.type ?? it.Type,
+      ErrorMessage: it.errorMessage ?? it.ErrorMessage ?? '',
+      LastAttemptTime: it.lastAttemptTime ?? it.LastAttemptTime,
+      Status: it.status ?? it.Status,
+    });
+
+    const mapped: DashboardMetrics = {
+      TotalFlowsToday: raw.totalFlowsToday ?? raw.TotalFlowsToday ?? 0,
+      SuccessfulFlowsToday: raw.successfulFlowsToday ?? raw.SuccessfulFlowsToday ?? 0,
+      FlowSuccessRate: raw.flowSuccessRate ?? raw.FlowSuccessRate ?? 0,
+
+      TotalGroupsToday: raw.totalGroupsToday ?? raw.TotalGroupsToday ?? 0,
+      SuccessfulGroupsToday: raw.successfulGroupsToday ?? raw.SuccessfulGroupsToday ?? 0,
+      GroupSuccessRate: raw.groupSuccessRate ?? raw.GroupSuccessRate ?? 0,
+
+      TotalTasksToday: raw.totalTasksToday ?? raw.TotalTasksToday ?? 0,
+      SuccessfulTasksToday: raw.successfulTasksToday ?? raw.SuccessfulTasksToday ?? 0,
+      TaskSuccessRate: raw.taskSuccessRate ?? raw.TaskSuccessRate ?? 0,
+
+      ActiveFlows: raw.activeFlows ?? raw.ActiveFlows ?? 0,
+      ActiveGroups: raw.activeGroups ?? raw.ActiveGroups ?? 0,
+      ActiveTasks: raw.activeTasks ?? raw.ActiveTasks ?? 0,
+
+      FailedLastAttemptToday: (raw.failedLastAttemptToday ?? raw.FailedLastAttemptToday ?? []).map(mapItem),
+    };
+
+    return mapped;
+  },
 };
 
 export type User = {
@@ -549,7 +661,26 @@ export const flowExecutionApi = {
       method: 'POST',
     }),
   resume: (flowId: string) =>
-    fetchApi<{ message: string }>(`/flow-execution/${flowId}/resume`, {
+    fetchApi<{ message: string }>(`/flow-execution/${flowId}/resume`, { method: 'POST' }),
+  markGroupAsSuccess: (groupId: string, flowExecutionId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/groups/${groupId}/mark-as-success/${flowExecutionId}`, { method: 'POST' }),
+  stopGroup: (groupId: string, flowExecutionId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/groups/${groupId}/stop/${flowExecutionId}`, { method: 'POST' }),
+  pauseGroup: (groupId: string, flowExecutionId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/groups/${groupId}/pause/${flowExecutionId}`, { method: 'POST' }),
+  resumeGroup: (groupId: string, flowExecutionId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/groups/${groupId}/resume/${flowExecutionId}`, { method: 'POST' }),
+  restartGroup: (groupId: string, flowId: string, flowExecutionId: string) =>
+    fetchApi<{ message: string }>(`/flow-execution/groups/${groupId}/restart/${flowId}/${flowExecutionId}`, { method: 'POST' }),
+};
+
+export const discoverySettingsApi = {
+  getAllDatabases: () => fetchApi<string[]>('/discoverysettings/databases'),
+  getSelectedDatabases: () => fetchApi<DiscoveryDatabase[]>('/discoverysettings/selected'),
+  saveSelectedDatabases: (databaseNames: string[]) =>
+    fetchApi<{ message: string }>('/discoverysettings/selected', {
       method: 'POST',
+      body: JSON.stringify(databaseNames),
     }),
+  syncProcedures: () => fetchApi<{ message: string }>('/discoverysettings/sync', { method: 'POST' }),
 };

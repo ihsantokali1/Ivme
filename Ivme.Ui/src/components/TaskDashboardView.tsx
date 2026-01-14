@@ -257,13 +257,13 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
           ⚠️ {data.errorMessage}
         </div>
       )}
-      
+      {/*
       {data.task.description && (
         <div className="text-xs text-gray-600 dark:text-gray-400 mb-1.5 line-clamp-2">
           {data.task.description}
         </div>
       )}
-      
+      */}
       {/* Butonlar */}
       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600 space-y-1.5">
         {/* Durdurma butonu - sadece Running durumunda göster */}
@@ -1197,7 +1197,7 @@ export default function TaskDashboardView({
               nodeTypes={memoizedNodeTypes}
               fitView
               fitViewOptions={{
-                padding: 50, // Padding artırıldı (taskları daha iyi görünür hale getirmek için)
+                padding: 20, // Padding artırıldı (taskları daha iyi görünür hale getirmek için)
                 minZoom: 1.2, // 2 birim daha yakınlaştırıldı (0.72 -> 1.2)
                 maxZoom: 2,
               }}

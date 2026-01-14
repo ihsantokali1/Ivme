@@ -320,6 +320,29 @@ public class TasksController : ControllerBase
         return Ok(new { message = "Task item restarted successfully" });
     }
 
+    [HttpGet("table-dependencies")]
+    public async Task<ActionResult<List<TaskTableDependency>>> GetTableDependencies([FromQuery] string? taskItemId = null)
+    {
+        if (_dbContext == null)
+        {
+            return Ok(new List<TaskTableDependency>());
+        }
+
+        var query = _dbContext.TaskTableDependencies.AsQueryable();
+
+        if (!string.IsNullOrEmpty(taskItemId))
+        {
+            query = query.Where(d => d.TaskItemId == taskItemId);
+        }
+
+        var dependencies = await query.OrderBy(d => d.DatabaseName)
+                                     .ThenBy(d => d.SchemaName)
+                                     .ThenBy(d => d.ProcedureName)
+                                     .ToListAsync();
+        
+        return Ok(dependencies);
+    }
+
 }
 
 public class FailTaskItemRequest

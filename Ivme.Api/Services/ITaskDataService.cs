@@ -32,5 +32,7 @@ public interface ITaskDataService
     Task<FlowItem?> GetFlowItemAsync(string flowItemId);
     Task<List<FlowGroupAssignment>> GetFlowGroupAssignmentsAsync(string flowItemId);
     Task<FlowGroupAssignment> UpdateFlowGroupAssignmentAsync(FlowGroupAssignment assignment);
+    Task<List<FlowSchedule>> GetActiveFlowSchedulesAsync();
+    Task<FlowSchedule> UpdateFlowScheduleAsync(FlowSchedule schedule);
 }
 

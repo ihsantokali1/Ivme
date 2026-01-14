@@ -40,7 +40,13 @@ if (dbConfig.UseDatabase && !string.IsNullOrEmpty(dbConfig.Server) && !string.Is
 {
     var connectionString = $"Server={dbConfig.Server};Database={dbConfig.Database};User Id={dbConfig.UserId};Password={dbConfig.Password};TrustServerCertificate=True;";
     builder.Services.AddDbContext<TaskDbContext>(options =>
-        options.UseSqlServer(connectionString));
+        options.UseSqlServer(connectionString, sqlOptions => 
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5, 
+                maxRetryDelay: TimeSpan.FromSeconds(30), 
+                errorNumbersToAdd: null);
+        }));
     Console.WriteLine($"[DB] Database mode enabled. Server: {dbConfig.Server}, Database: {dbConfig.Database}");
 }
 else
@@ -185,13 +191,17 @@ async Task EnsureExecutionHistoryTablesAsync(TaskDbContext dbContext)
                     [RetryCount] INT NOT NULL DEFAULT 0,
                     [Progress] INT NOT NULL DEFAULT 0,
                     [TaskParameterValues] NVARCHAR(MAX) NULL,
-                    [TriggeredBy] NVARCHAR(50) NULL,
+                    [TriggeredBy] NVARCHAR(200) NULL,
+                    [FlowItemId] NVARCHAR(50) NULL,
+                    [FlowItemExecutionId] NVARCHAR(50) NULL,
                     [CreatedAt] DATETIME2 NOT NULL
                 );
                 
                 CREATE INDEX [IX_TaskExecutionHistories_TaskItemId] ON [TaskExecutionHistories]([TaskItemId]);
                 CREATE INDEX [IX_TaskExecutionHistories_GroupId] ON [TaskExecutionHistories]([GroupId]);
                 CREATE INDEX [IX_TaskExecutionHistories_GroupExecutionId] ON [TaskExecutionHistories]([GroupExecutionId]);
+                CREATE INDEX [IX_TaskExecutionHistories_FlowItemId] ON [TaskExecutionHistories]([FlowItemId]);
+                CREATE INDEX [IX_TaskExecutionHistories_FlowItemExecutionId] ON [TaskExecutionHistories]([FlowItemExecutionId]);
                 CREATE INDEX [IX_TaskExecutionHistories_StartTime] ON [TaskExecutionHistories]([StartTime]);
             END
             ELSE
@@ -218,7 +228,21 @@ async Task EnsureExecutionHistoryTablesAsync(TaskDbContext dbContext)
                 -- Mevcut tabloya TriggeredBy kolonunu ekle (yoksa)
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND name = 'TriggeredBy')
                 BEGIN
-                    ALTER TABLE [dbo].[TaskExecutionHistories] ADD [TriggeredBy] NVARCHAR(50) NULL;
+                    ALTER TABLE [dbo].[TaskExecutionHistories] ADD [TriggeredBy] NVARCHAR(200) NULL;
+                END
+
+                -- Mevcut tabloya FlowItemId kolonunu ekle (yoksa)
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND name = 'FlowItemId')
+                BEGIN
+                    ALTER TABLE [dbo].[TaskExecutionHistories] ADD [FlowItemId] NVARCHAR(50) NULL;
+                    CREATE INDEX [IX_TaskExecutionHistories_FlowItemId] ON [TaskExecutionHistories]([FlowItemId]);
+                END
+
+                -- Mevcut tabloya FlowItemExecutionId kolonunu ekle (yoksa)
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[TaskExecutionHistories]') AND name = 'FlowItemExecutionId')
+                BEGIN
+                    ALTER TABLE [dbo].[TaskExecutionHistories] ADD [FlowItemExecutionId] NVARCHAR(50) NULL;
+                    CREATE INDEX [IX_TaskExecutionHistories_FlowItemExecutionId] ON [TaskExecutionHistories]([FlowItemExecutionId]);
                 END
             END";
         await command.ExecuteNonQueryAsync();
@@ -249,11 +273,15 @@ async Task EnsureExecutionHistoryTablesAsync(TaskDbContext dbContext)
                     [CompletedTasks] INT NOT NULL DEFAULT 0,
                     [FailedTasks] INT NOT NULL DEFAULT 0,
                     [TotalErrors] INT NOT NULL DEFAULT 0,
-                    [TriggeredBy] NVARCHAR(50) NULL,
+                    [TriggeredBy] NVARCHAR(200) NULL,
+                    [FlowItemId] NVARCHAR(50) NULL,
+                    [FlowItemExecutionId] NVARCHAR(50) NULL,
                     [CreatedAt] DATETIME2 NOT NULL
                 );
                 
                 CREATE INDEX [IX_GroupExecutionHistories_GroupId] ON [GroupExecutionHistories]([GroupId]);
+                CREATE INDEX [IX_GroupExecutionHistories_FlowItemId] ON [GroupExecutionHistories]([FlowItemId]);
+                CREATE INDEX [IX_GroupExecutionHistories_FlowItemExecutionId] ON [GroupExecutionHistories]([FlowItemExecutionId]);
                 CREATE INDEX [IX_GroupExecutionHistories_StartTime] ON [GroupExecutionHistories]([StartTime]);
             END";
         await command.ExecuteNonQueryAsync();
@@ -576,15 +604,35 @@ async Task EnsureFlowTablesAsync(TaskDbContext dbContext)
             END";
         await command.ExecuteNonQueryAsync();
 
-        // GroupExecutionHistories tablosunu güncelle - FlowExecutionId ekle
+        // GroupExecutionHistories tablosunu güncelle - Flow identifiers ekle
         command.CommandText = @"
             IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND type in (N'U'))
             BEGIN
-                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowExecutionId')
-                BEGIN
-                    ALTER TABLE [dbo].[GroupExecutionHistories] ADD [FlowExecutionId] NVARCHAR(MAX) NULL;
-                    PRINT '[DB] Added FlowExecutionId to GroupExecutionHistories';
-                END
+                 -- FlowExecutionId -> FlowItemExecutionId olarak güncelle (eğer varsa)
+                 IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowExecutionId')
+                    AND NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowItemExecutionId')
+                 BEGIN
+                    EXEC sp_rename 'dbo.GroupExecutionHistories.FlowExecutionId', 'FlowItemExecutionId', 'COLUMN';
+                    PRINT '[DB] Renamed FlowExecutionId to FlowItemExecutionId in GroupExecutionHistories';
+                 END
+                 ELSE IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowItemExecutionId')
+                 BEGIN
+                    ALTER TABLE [dbo].[GroupExecutionHistories] ADD [FlowItemExecutionId] NVARCHAR(50) NULL;
+                    PRINT '[DB] Added FlowItemExecutionId to GroupExecutionHistories';
+                 END
+
+                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'FlowItemId')
+                 BEGIN
+                    ALTER TABLE [dbo].[GroupExecutionHistories] ADD [FlowItemId] NVARCHAR(50) NULL;
+                    PRINT '[DB] Added FlowItemId to GroupExecutionHistories';
+                 END
+
+                 -- Index'leri oluştur
+                 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'IX_GroupExecutionHistories_FlowItemId')
+                    CREATE INDEX [IX_GroupExecutionHistories_FlowItemId] ON [GroupExecutionHistories]([FlowItemId]);
+                 
+                 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'IX_GroupExecutionHistories_FlowItemExecutionId')
+                    CREATE INDEX [IX_GroupExecutionHistories_FlowItemExecutionId] ON [GroupExecutionHistories]([FlowItemExecutionId]);
             END";
         await command.ExecuteNonQueryAsync();
         
@@ -854,6 +902,7 @@ timer.Elapsed += async (sender, e) =>
         var managementService = scope.ServiceProvider.GetRequiredService<ITaskManagementService>();
         await managementService.CheckAndUpdateTaskItemStatusesAsync();
         await managementService.CheckAndTriggerScheduledGroupsAsync();
+        await managementService.CheckAndTriggerScheduledFlowsAsync();
     }
     catch (Exception ex)
     {

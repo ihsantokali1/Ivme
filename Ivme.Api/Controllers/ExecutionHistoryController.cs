@@ -38,6 +38,16 @@ public class ExecutionHistoryController : ControllerBase
         return Ok(histories);
     }
 
+    [HttpGet("flows")]
+    public async Task<ActionResult<List<FlowExecutionHistory>>> GetFlowExecutionHistories(
+        [FromQuery] string? flowItemId = null,
+        [FromQuery] DateTime? startDate = null,
+        [FromQuery] DateTime? endDate = null)
+    {
+        var histories = await _executionHistoryService.GetFlowExecutionHistoriesAsync(flowItemId, startDate, endDate);
+        return Ok(histories);
+    }
+
     [HttpGet("tasks/{id}")]
     public async Task<ActionResult<TaskExecutionHistory>> GetTaskExecutionHistory(string id)
     {
@@ -53,6 +63,17 @@ public class ExecutionHistoryController : ControllerBase
     public async Task<ActionResult<GroupExecutionHistory>> GetGroupExecutionHistory(string id)
     {
         var history = await _executionHistoryService.GetGroupExecutionHistoryAsync(id);
+        if (history == null)
+        {
+            return NotFound();
+        }
+        return Ok(history);
+    }
+
+    [HttpGet("flows/{id}")]
+    public async Task<ActionResult<FlowExecutionHistory>> GetFlowExecutionHistory(string id)
+    {
+        var history = await _executionHistoryService.GetFlowExecutionHistoryAsync(id);
         if (history == null)
         {
             return NotFound();
@@ -79,6 +100,20 @@ public class ExecutionHistoryController : ControllerBase
             kvp => new { status = kvp.Value.Status.ToString(), errorMessage = kvp.Value.ErrorMessage }
         );
         return Ok(result);
+    }
+
+    [HttpGet("today-flow-statuses")]
+    public async Task<ActionResult<Dictionary<string, string>>> GetTodayFlowStatuses()
+    {
+        var statuses = await _executionHistoryService.GetTodayFlowStatusesAsync();
+        return Ok(statuses);
+    }
+
+    [HttpGet("metrics")]
+    public async Task<ActionResult<DashboardMetrics>> GetDashboardMetrics()
+    {
+        var metrics = await _executionHistoryService.GetDashboardMetricsAsync();
+        return Ok(metrics);
     }
 }
 

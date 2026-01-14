@@ -18,8 +18,9 @@ public class TaskItem
     
     // Stored Procedure desteği
     public TaskSourceType? SourceType { get; set; } = TaskSourceType.Manual; // Nullable - eski kayıtlar için
-    public string? StoredProcedureName { get; set; } // SP ise SP adı (örn: "dbo.usp_ProcessData")
+    public string? StoredProcedureName { get; set; } // SP ise SP adı (örn: "usp_ProcessData")
     public string? StoredProcedureSchema { get; set; } = "dbo"; // SP schema'sı
+    public string? StoredProcedureDatabase { get; set; } // SP'nin bulunduğu veritabanı
     public DateTime? LastDiscoveredAt { get; set; } // Son keşif zamanı (SP'ler için)
     public bool? IsActive { get; set; } = true; // SP silinmişse false yapılır (nullable - eski kayıtlar için)
     

@@ -15,9 +15,58 @@ import UsersPage from './pages/UsersPage';
 import PermissionsPage from './pages/PermissionsPage';
 import RolesPage from './pages/RolesPage';
 import DashboardPage from './pages/DashboardPage';
+import DiscoverySettingsPage from './pages/DiscoverySettingsPage';
 import { canViewPage } from './utils/permissions';
 
-type TabType = 'dashboard' | 'tasks' | 'groups' | 'flows' | 'flow-groups' | 'configuration' | 'schedule' | 'flow-schedule' | 'management' | 'history' | 'tv' | 'users' | 'permissions' | 'roles';
+type TabType = 'dashboard' | 'tasks' | 'groups' | 'flows' | 'flow-groups' | 'configuration' | 'schedule' | 'flow-schedule' | 'management' | 'history' | 'tv' | 'users' | 'permissions' | 'roles' | 'discovery-settings';
+
+function NavDropdown({ label, children, active, icon }: { label: string, children: React.ReactNode, active: boolean, icon: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="relative group">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        onBlur={(e) => {
+          // Close if clicking outside
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setTimeout(() => setIsOpen(false), 200);
+          }
+        }}
+        className={`px-6 py-3 rounded-lg font-medium transition-all flex items-center gap-2 ${active
+          ? 'bg-white text-blue-600 shadow-lg font-semibold'
+          : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
+          }`}
+      >
+        <span>{icon}</span> {label}
+        <svg className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-50">
+          <div className="py-2">
+            {children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavItem({ label, active, onClick, icon }: { label: string, active: boolean, onClick: () => void, icon?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${active
+        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-semibold'
+        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+        }`}
+    >
+      {icon && <span>{icon}</span>} {label}
+    </button>
+  );
+}
 
 function LogoutButton() {
   const { logout, user } = useAuth();
@@ -146,84 +195,52 @@ function AppContent() {
                   📊 Dashboard
                 </button>
               )}
-              {canViewPage(user?.role, 'tasks') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'tasks'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('tasks')}
-                >
-                  1. Task Tanımlama
-                </button>
-              )}
-              {canViewPage(user?.role, 'groups') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'groups'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('groups')}
-                >
-                  2. Grup Tanımlama
-                </button>
-              )}
-              {canViewPage(user?.role, 'flow') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'flows'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('flows')}
-                >
-                  3. Akış Tanımlama
-                </button>
-              )}
-              {/* New Flow-Group Configuration Tab */}
-              {canViewPage(user?.role, 'flow') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'flow-groups'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('flow-groups')}
-                >
-                  4. Akış-Grup İlişkisi
-                </button>
-              )}
-              {canViewPage(user?.role, 'configuration') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'configuration'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('configuration')}
-                >
-                  5. Grup-Task İlişkisi ve Sıralama
-                </button>
-              )}
-              {canViewPage(user?.role, 'schedule') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'schedule'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('schedule')}
-                >
-                  6. Grup Yönetimi
-                </button>
-              )}
-              {canViewPage(user?.role, 'flow') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'flow-schedule'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('flow-schedule')}
-                >
-                  7. Akış Yönetimi
-                </button>
-              )}
+
+              {/* Tanımlama Grubu */}
+              <NavDropdown
+                label="Tanımlama"
+                icon="📝"
+                active={['tasks', 'groups', 'flows'].includes(activeTab)}
+              >
+                {canViewPage(user?.role, 'tasks') && (
+                  <NavItem label="1. Task Tanımlama" active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} />
+                )}
+                {canViewPage(user?.role, 'groups') && (
+                  <NavItem label="2. Grup Tanımlama" active={activeTab === 'groups'} onClick={() => setActiveTab('groups')} />
+                )}
+                {canViewPage(user?.role, 'flows') && (
+                  <NavItem label="3. Akış Tanımlama" active={activeTab === 'flows'} onClick={() => setActiveTab('flows')} />
+                )}
+              </NavDropdown>
+
+              {/* İlişki Grubu */}
+              <NavDropdown
+                label="İlişki"
+                icon="🔗"
+                active={['flow-groups', 'configuration'].includes(activeTab)}
+              >
+                {canViewPage(user?.role, 'flow') && (
+                  <NavItem label="4. Akış-Grup İlişkisi" active={activeTab === 'flow-groups'} onClick={() => setActiveTab('flow-groups')} />
+                )}
+                {canViewPage(user?.role, 'configuration') && (
+                  <NavItem label="5. Grup-Task İlişkisi ve Sıralama" active={activeTab === 'configuration'} onClick={() => setActiveTab('configuration')} />
+                )}
+              </NavDropdown>
+
+              {/* Zamanlama Grubu */}
+              <NavDropdown
+                label="Zamanlama"
+                icon="🕒"
+                active={['schedule', 'flow-schedule'].includes(activeTab)}
+              >
+                {canViewPage(user?.role, 'schedule') && (
+                  <NavItem label="6. Grup Yönetimi" active={activeTab === 'schedule'} onClick={() => setActiveTab('schedule')} />
+                )}
+                {canViewPage(user?.role, 'flow') && (
+                  <NavItem label="7. Akış Yönetimi" active={activeTab === 'flow-schedule'} onClick={() => setActiveTab('flow-schedule')} />
+                )}
+              </NavDropdown>
+
               {canViewPage(user?.role, 'management') && (
                 <button
                   className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'management'
@@ -232,9 +249,10 @@ function AppContent() {
                     }`}
                   onClick={() => setActiveTab('management')}
                 >
-                  8. Yönetim ve İzleme
+                  📈 Yönetim ve İzleme
                 </button>
               )}
+
               {canViewPage(user?.role, 'history') && (
                 <button
                   className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'history'
@@ -243,9 +261,10 @@ function AppContent() {
                     }`}
                   onClick={() => setActiveTab('history')}
                 >
-                  9. Çalışma Geçmişi
+                  📜 Çalışma Geçmişi
                 </button>
               )}
+
               {canViewPage(user?.role, 'tv') && (
                 <button
                   className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === ('tv' as TabType)
@@ -257,39 +276,26 @@ function AppContent() {
                   📺 TV Görünümü
                 </button>
               )}
-              {canViewPage(user?.role, 'users') && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'users'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('users')}
-                >
-                  👥 Kullanıcı Yönetimi
-                </button>
-              )}
-              {user?.role === 'Admin' && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'roles'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('roles')}
-                >
-                  🎭 Rol Yönetimi
-                </button>
-              )}
-              {user?.role === 'Admin' && (
-                <button
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'permissions'
-                    ? 'bg-white text-blue-600 shadow-lg font-semibold'
-                    : 'bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm border border-white/20'
-                    }`}
-                  onClick={() => setActiveTab('permissions')}
-                >
-                  🔐 Yetki Yönetimi
-                </button>
-              )}
+
+              {/* Ayarlar Grubu */}
+              <NavDropdown
+                label="Ayarlar"
+                icon="⚙️"
+                active={['users', 'roles', 'permissions', 'discovery-settings'].includes(activeTab)}
+              >
+                {canViewPage(user?.role, 'users') && (
+                  <NavItem label="Kullanıcı Yönetimi" icon="👥" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                )}
+                {user?.role === 'Admin' && (
+                  <NavItem label="Rol Yönetimi" icon="🎭" active={activeTab === 'roles'} onClick={() => setActiveTab('roles')} />
+                )}
+                {user?.role === 'Admin' && (
+                  <NavItem label="Yetki Yönetimi" icon="🔐" active={activeTab === 'permissions'} onClick={() => setActiveTab('permissions')} />
+                )}
+                {user?.role === 'Admin' && (
+                  <NavItem label="Keşif Ayarları" icon="⚙️" active={activeTab === 'discovery-settings'} onClick={() => setActiveTab('discovery-settings')} />
+                )}
+              </NavDropdown>
             </nav>
           </div>
         </header>
@@ -311,6 +317,7 @@ function AppContent() {
           {activeTab === 'users' && <UsersPage />}
           {activeTab === 'roles' && <RolesPage />}
           {activeTab === 'permissions' && <PermissionsPage />}
+          {activeTab === 'discovery-settings' && <DiscoverySettingsPage />}
         </main>
       )}
     </div>

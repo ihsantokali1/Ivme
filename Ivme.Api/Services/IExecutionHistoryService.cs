@@ -4,14 +4,14 @@ namespace Ivme.Api.Services;
 
 public interface IExecutionHistoryService
 {
-    Task<TaskExecutionHistory> StartTaskExecutionAsync(string taskItemId, string? groupId = null, string? groupExecutionId = null, Dictionary<string, string?>? taskParameterValues = null, string? triggeredBy = null);
+    Task<TaskExecutionHistory> StartTaskExecutionAsync(string taskItemId, string? groupId = null, string? groupExecutionId = null, string? flowItemId = null, string? flowItemExecutionId = null, Dictionary<string, string?>? taskParameterValues = null, string? triggeredBy = null);
     Task CompleteTaskExecutionAsync(string executionId, TaskItemStatus finalStatus, int progress);
     Task FailTaskExecutionAsync(string executionId, string errorMessage);
     Task IncrementTaskErrorCountAsync(string executionId, string errorMessage);
     Task SetTaskRetryStartTimeAsync(string executionId, DateTime retryStartTime);
     Task UpdateTaskExecutionStatusAsync(string executionId, TaskItemStatus status);
     
-    Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null);
+    Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null);
     Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors);
     
     // Flow Execution
@@ -51,5 +51,15 @@ public interface IExecutionHistoryService
     /// Bugün başlamış task'ların son statülerini ve error message'larını grup bazında getirir
     /// </summary>
     Task<Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>> GetTodayTaskStatusesWithErrorsByGroupAsync();
+
+    /// <summary>
+    /// Bugün başlamış flow'ların son statülerini getirir
+    /// </summary>
+    Task<Dictionary<string, string>> GetTodayFlowStatusesAsync();
+
+    /// <summary>
+    /// Dashboard için detaylı metrikleri getirir
+    /// </summary>
+    Task<DashboardMetrics> GetDashboardMetricsAsync();
 }
 

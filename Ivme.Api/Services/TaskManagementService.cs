@@ -182,7 +182,7 @@ public class TaskManagementService : ITaskManagementService
         return (true, null);
     }
 
-    public async Task<bool> StartTaskItemAsync(string taskItemId, string? groupId = null, bool skipCanStartCheck = false, string? triggeredBy = null)
+    public async Task<bool> StartTaskItemAsync(string taskItemId, string? groupId = null, bool skipCanStartCheck = false, string? triggeredBy = null, string? flowItemId = null, string? flowItemExecutionId = null)
     {
         if (!skipCanStartCheck && !await CanStartTaskItemAsync(taskItemId, groupId))
         {
@@ -231,6 +231,8 @@ public class TaskManagementService : ITaskManagementService
         {
             var latestGroupExecution = await _executionHistoryService.GetLatestGroupExecutionTodayAsync(groupId);
             groupExecutionId = latestGroupExecution?.Id;
+            flowItemId ??= latestGroupExecution?.FlowItemId;
+            flowItemExecutionId ??= latestGroupExecution?.FlowItemExecutionId;
         }
         
         // Execution history başlat - parametreleri de ekle
@@ -248,7 +250,7 @@ public class TaskManagementService : ITaskManagementService
             triggeredBy = "System";
         }
         var parameterValues = assignment?.TaskParameterValues ?? new Dictionary<string, string?>();
-        await _executionHistoryService.StartTaskExecutionAsync(taskItemId, groupId, groupExecutionId, parameterValues, triggeredBy);
+        await _executionHistoryService.StartTaskExecutionAsync(taskItemId, groupId, groupExecutionId, flowItemId, flowItemExecutionId, parameterValues, triggeredBy);
         
         // Eğer SP ise, SP'yi çalıştır
         if (taskItem.SourceType.HasValue && taskItem.SourceType.Value == TaskSourceType.StoredProcedure && !string.IsNullOrEmpty(taskItem.StoredProcedureName))
@@ -401,9 +403,10 @@ public class TaskManagementService : ITaskManagementService
         // Resume işlemi için yeni bir execution history başlat (çünkü önceki paused olarak tamamlandı)
         // Aktif group execution'ı bul ve groupExecutionId'yi al
         string? groupExecutionId = null;
+        GroupExecutionHistory? latestGroupExecution = null;
         if (!string.IsNullOrEmpty(groupId))
         {
-            var latestGroupExecution = await _executionHistoryService.GetLatestGroupExecutionTodayAsync(groupId);
+            latestGroupExecution = await _executionHistoryService.GetLatestGroupExecutionTodayAsync(groupId);
             groupExecutionId = latestGroupExecution?.Id;
         }
         // Parametreleri al
@@ -411,7 +414,10 @@ public class TaskManagementService : ITaskManagementService
         var assignment = data.GroupTaskAssignments.FirstOrDefault(a => a.TaskItemId == taskItemId && a.GroupId == groupId);
         var parameterValues = assignment?.TaskParameterValues ?? new Dictionary<string, string?>();
         
-        await _executionHistoryService.StartTaskExecutionAsync(taskItemId, groupId, groupExecutionId, parameterValues);
+        var flowItemId = latestGroupExecution?.FlowItemId;
+        var flowItemExecutionId = latestGroupExecution?.FlowItemExecutionId;
+
+        await _executionHistoryService.StartTaskExecutionAsync(taskItemId, groupId, groupExecutionId, flowItemId, flowItemExecutionId, parameterValues);
         
         return true;
     }
@@ -623,7 +629,10 @@ public class TaskManagementService : ITaskManagementService
                     var assignment = data.GroupTaskAssignments.FirstOrDefault(a => a.TaskItemId == taskItemId && a.GroupId == resolvedGroupId);
                     var parameterValues = assignment?.TaskParameterValues ?? new Dictionary<string, string?>();
                     
-                    var newExecution = await _executionHistoryService.StartTaskExecutionAsync(taskItemId, resolvedGroupId, completedTaskGroupExecutionId, parameterValues);
+                    var flowItemId = latestGroupExecution.FlowItemId;
+                    var flowItemExecutionId = latestGroupExecution.FlowItemExecutionId;
+                    
+                    var newExecution = await _executionHistoryService.StartTaskExecutionAsync(taskItemId, resolvedGroupId, completedTaskGroupExecutionId, flowItemId, flowItemExecutionId, parameterValues);
                     await _executionHistoryService.CompleteTaskExecutionAsync(newExecution.Id, TaskItemStatus.Completed, 100);
                 }
             }
@@ -1006,7 +1015,10 @@ public class TaskManagementService : ITaskManagementService
                     var assignment = data.GroupTaskAssignments.FirstOrDefault(a => a.TaskItemId == taskItemId && a.GroupId == resolvedGroupId);
                     var parameterValues = assignment?.TaskParameterValues ?? new Dictionary<string, string?>();
                     
-                    var newExecution = await _executionHistoryService.StartTaskExecutionAsync(taskItemId, resolvedGroupId, completedTaskGroupExecutionId, parameterValues);
+                    var flowItemId = latestGroupExecution.FlowItemId;
+                    var flowItemExecutionId = latestGroupExecution.FlowItemExecutionId;
+                    
+                    var newExecution = await _executionHistoryService.StartTaskExecutionAsync(taskItemId, resolvedGroupId, completedTaskGroupExecutionId, flowItemId, flowItemExecutionId, parameterValues);
                     await _executionHistoryService.CompleteTaskExecutionAsync(newExecution.Id, TaskItemStatus.MarkedAsSuccess, 100);
                 }
             }
@@ -1875,9 +1887,9 @@ public class TaskManagementService : ITaskManagementService
                         );
 
                         // Akış içindeyse bir sonraki grupları tetikle
-                        if (!string.IsNullOrEmpty(activeGroupExecution.FlowExecutionId))
+                        if (!string.IsNullOrEmpty(activeGroupExecution.FlowItemExecutionId))
                         {
-                            await StartDependentGroupsAsync(group.Id, activeGroupExecution.FlowExecutionId);
+                            await StartDependentGroupsAsync(group.Id, activeGroupExecution.FlowItemExecutionId);
                         }
                     }
                 }
@@ -2156,7 +2168,7 @@ public class TaskManagementService : ITaskManagementService
         return readyTaskItems;
     }
 
-    public async Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual", string? flowExecutionId = null)
+    public async Task<bool> StartGroupAsync(string groupId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null)
     {
         var group = await _dataService.GetGroupAsync(groupId);
         if (group == null)
@@ -2172,7 +2184,7 @@ public class TaskManagementService : ITaskManagementService
         }
 
         // Group execution history başlat
-        var groupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowExecutionId);
+        var groupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowItemId, flowItemExecutionId);
         
         var groupName = group?.Name ?? groupId;
         Console.WriteLine($"[STATUS] Group '{groupName}' -> Started");
@@ -2213,7 +2225,7 @@ public class TaskManagementService : ITaskManagementService
                 var taskItem = await _dataService.GetTaskItemAsync(assignment.TaskItemId);
                 if (taskItem != null)
                 {
-                    await StartTaskItemAsync(taskItem.Id, groupId, triggeredBy: triggeredBy);
+                    await StartTaskItemAsync(taskItem.Id, groupId, triggeredBy: triggeredBy, flowItemId: flowItemId, flowItemExecutionId: flowItemExecutionId);
                 }
             }
         }
@@ -2254,7 +2266,7 @@ public class TaskManagementService : ITaskManagementService
         return dependentTaskIds;
     }
 
-    public async Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual", string? flowExecutionId = null)
+    public async Task<bool> StartGroupFromTaskAsync(string groupId, string fromTaskItemId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null)
     {
         // 1. ADIM: Grup varlığını kontrol et
         var group = await _dataService.GetGroupAsync(groupId);
@@ -2286,7 +2298,7 @@ public class TaskManagementService : ITaskManagementService
         var tasksToExcludeFromHistory = FindAllDependentTasks(fromTaskItemId, assignments);
 
         // 6. ADIM: Yeni grup execution başlat
-        var newGroupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowExecutionId);
+        var newGroupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowItemId, flowItemExecutionId);
 
         // 7. ADIM: 5. adımda bulunan task'lar harici tüm task statülerini yeni execution'a kopyala
         if (previousGroupExecution != null)
@@ -2326,6 +2338,8 @@ public class TaskManagementService : ITaskManagementService
                                 ErrorMessage = previousExecution.ErrorMessage,
                                 ErrorCount = previousExecution.ErrorCount,
                                 RetryStartTime = previousExecution.RetryStartTime,
+                                FlowItemId = previousExecution.FlowItemId,
+                                FlowItemExecutionId = previousExecution.FlowItemExecutionId,
                                 TaskParameterValues = previousExecution.TaskParameterValues ?? new Dictionary<string, string?>()
                             };
 
@@ -2368,6 +2382,8 @@ public class TaskManagementService : ITaskManagementService
                                     ErrorMessage = null,
                                     ErrorCount = 0,
                                     RetryStartTime = null,
+                                    FlowItemId = flowItemId,
+                                    FlowItemExecutionId = flowItemExecutionId,
                                     TaskParameterValues = assignmentForPending.TaskParameterValues ?? new Dictionary<string, string?>()
                                 };
 
@@ -2430,7 +2446,7 @@ public class TaskManagementService : ITaskManagementService
         {
             // skipCanStartCheck = true: Ortadan başlatma yaparken CanStartTaskItemAsync kontrolünü atla
             // çünkü manuel olarak başlatıyoruz ve önşartlar zaten history'den kopyalandı
-            await StartTaskItemAsync(fromTaskItem.Id, groupId, skipCanStartCheck: true, triggeredBy: triggeredBy);
+            await StartTaskItemAsync(fromTaskItem.Id, groupId, skipCanStartCheck: true, triggeredBy: triggeredBy, flowItemId: flowItemId, flowItemExecutionId: flowItemExecutionId);
         }
 
         return true;
@@ -2438,13 +2454,30 @@ public class TaskManagementService : ITaskManagementService
 
     public async Task<bool> StartFlowAsync(string flowItemId, string triggeredBy = "Manual")
     {
+        Console.WriteLine($"[StartFlowAsync] Attempting to start Flow: {flowItemId} triggered by {triggeredBy}");
+        
         // 1. Akışı kontrol et
         var flowItem = await _dataService.GetFlowItemAsync(flowItemId);
-        if (flowItem == null) return false;
+        if (flowItem == null) 
+        {
+            Console.WriteLine($"[StartFlowAsync] ERROR: FlowItem {flowItemId} not found.");
+            // Diagnostik için mevcut tüm flow item'ları bas
+            var allFlows = await _dataService.GetDataAsync();
+            Console.WriteLine($"[StartFlowAsync] Available FlowItems Count: {allFlows.FlowItems.Count}");
+            foreach (var f in allFlows.FlowItems)
+            {
+                Console.WriteLine($"[StartFlowAsync] Available Flow: Id={f.Id}, Name={f.Name}");
+            }
+            return false;
+        }
 
         // 2. Akışa ait grupları al
         var flowAssignments = await _dataService.GetFlowGroupAssignmentsAsync(flowItemId);
-        if (flowAssignments.Count == 0) return false;
+        if (flowAssignments.Count == 0) 
+        {
+            Console.WriteLine($"[StartFlowAsync] ERROR: No group assignments found for Flow {flowItemId}.");
+            return false;
+        }
 
         // 3. Flow Execution History başlat
         var flowExecution = await _executionHistoryService.StartFlowExecutionAsync(flowItemId, triggeredBy);
@@ -2477,7 +2510,7 @@ public class TaskManagementService : ITaskManagementService
             {
                 // Başlat
                 Console.WriteLine($"[FLOW] Starting initial group: {assignment.GroupId}");
-                await StartGroupAsync(assignment.GroupId, triggeredBy, flowExecution.Id);
+                await StartGroupAsync(assignment.GroupId, triggeredBy, flowItemId, flowExecution.Id);
                 
                 // FlowGroupAssignment durumunu Running yap
                 assignment.Status = TaskItemStatus.Running;
@@ -2518,7 +2551,7 @@ public class TaskManagementService : ITaskManagementService
                         // Şimdilik sadece bu flow execution'a ait tamamlanmış group execution var mı ona bakalım.
                         var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: prereqId);
                         var completedPrereq = groupExecutions.Any(e => 
-                            e.FlowExecutionId == flowExecutionId && e.EndTime != null && e.FailedTasks == 0);
+                            e.FlowItemExecutionId == flowExecutionId && e.EndTime != null && e.FailedTasks == 0);
                         
                         if (!completedPrereq)
                         {
@@ -2531,7 +2564,7 @@ public class TaskManagementService : ITaskManagementService
                 if (allPrerequisitesCompleted)
                 {
                     // Grubu başlat
-                    await StartGroupAsync(assignment.GroupId, "Flow", flowExecutionId);
+                    await StartGroupAsync(assignment.GroupId, "Flow", flowId, flowExecutionId);
                     
                     // FlowGroupAssignment durumunu Running yap
                     assignment.Status = TaskItemStatus.Running;
@@ -2539,6 +2572,172 @@ public class TaskManagementService : ITaskManagementService
                     await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
                 }
             }
+        }
+    }
+
+    public async Task<bool> MarkGroupAsSuccessAsync(string groupId, string flowItemExecutionId)
+    {
+        try
+        {
+            // 1. Group execution history'yi bul ve güncelle
+            var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: groupId);
+            var latestExec = groupExecutions
+                .Where(e => e.FlowItemExecutionId == flowItemExecutionId)
+                .OrderByDescending(e => e.StartTime)
+                .FirstOrDefault();
+
+            if (latestExec != null)
+            {
+                latestExec.EndTime ??= DateTime.Now;
+                latestExec.FailedTasks = 0; // Bağımlı grupların başlayabilmesi için FailedTasks 0 olmalı
+                
+                await _executionHistoryService.CompleteGroupExecutionAsync(
+                    latestExec.Id, 
+                    latestExec.TotalTasks, 
+                    latestExec.TotalTasks, // Tümünü tamamlanmış say
+                    0, 
+                    0
+                );
+            }
+
+            // 2. FlowGroupAssignment durumunu güncelle
+            var flowExecution = await _executionHistoryService.GetFlowExecutionHistoryAsync(flowItemExecutionId);
+            if (flowExecution != null)
+            {
+                var assignments = await _dataService.GetFlowGroupAssignmentsAsync(flowExecution.FlowItemId);
+                var assignment = assignments.FirstOrDefault(a => a.GroupId == groupId);
+                if (assignment != null)
+                {
+                    assignment.Status = TaskItemStatus.MarkedAsSuccess;
+                    assignment.EndTime = DateTime.Now;
+                    await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
+                }
+            }
+
+            // 3. Bağımlı grupları tetikle
+            await StartDependentGroupsAsync(groupId, flowItemExecutionId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MarkGroupAsSuccessAsync] Error: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> StopGroupAsync(string groupId, string flowItemExecutionId)
+    {
+        try
+        {
+            // Gruptaki tüm aktif taskları durdur
+            var activeTasks = await _executionHistoryService.GetTaskExecutionHistoriesAsync(groupId: groupId);
+            
+            // Mevcut group execution id'yi bul
+            var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: groupId);
+            var latestExec = groupExecutions
+                .Where(e => e.FlowItemExecutionId == flowItemExecutionId && e.EndTime == null)
+                .FirstOrDefault();
+
+            if (latestExec != null)
+            {
+                var tasksToStop = activeTasks.Where(t => t.GroupExecutionId == latestExec.Id && t.EndTime == null);
+                foreach (var task in tasksToStop)
+                {
+                    await StopTaskItemAsync(task.TaskItemId, groupId);
+                }
+            }
+
+            // FlowGroupAssignment durumunu güncelle
+            var flowExecution = await _executionHistoryService.GetFlowExecutionHistoryAsync(flowItemExecutionId);
+            if (flowExecution != null)
+            {
+                var assignments = await _dataService.GetFlowGroupAssignmentsAsync(flowExecution.FlowItemId);
+                var assignment = assignments.FirstOrDefault(a => a.GroupId == groupId);
+                if (assignment != null)
+                {
+                    assignment.Status = TaskItemStatus.Failed;
+                    assignment.EndTime = DateTime.Now;
+                    await _dataService.UpdateFlowGroupAssignmentAsync(assignment);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[StopGroupAsync] Error: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> PauseGroupAsync(string groupId, string flowItemExecutionId)
+    {
+        try
+        {
+            var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: groupId);
+            var latestExec = groupExecutions
+                .Where(e => e.FlowItemExecutionId == flowItemExecutionId && e.EndTime == null)
+                .FirstOrDefault();
+
+            if (latestExec != null)
+            {
+                var activeTasks = await _executionHistoryService.GetTaskExecutionHistoriesAsync(groupId: groupId);
+                var tasksToPause = activeTasks.Where(t => t.GroupExecutionId == latestExec.Id && t.EndTime == null && t.FinalStatus == TaskItemStatus.Running);
+                foreach (var task in tasksToPause)
+                {
+                    await PauseTaskItemAsync(task.TaskItemId, groupId);
+                }
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PauseGroupAsync] Error: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> ResumeGroupAsync(string groupId, string flowItemExecutionId)
+    {
+        try
+        {
+            var groupExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId: groupId);
+            var latestExec = groupExecutions
+                .Where(e => e.FlowItemExecutionId == flowItemExecutionId && e.EndTime == null)
+                .FirstOrDefault();
+
+            if (latestExec != null)
+            {
+                var activeTasks = await _executionHistoryService.GetTaskExecutionHistoriesAsync(groupId: groupId);
+                var tasksToResume = activeTasks.Where(t => t.GroupExecutionId == latestExec.Id && t.FinalStatus == TaskItemStatus.Paused);
+                foreach (var task in tasksToResume)
+                {
+                    await ResumeTaskItemAsync(task.TaskItemId, groupId);
+                }
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ResumeGroupAsync] Error: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<bool> RestartGroupInFlowAsync(string groupId, string flowItemId, string flowItemExecutionId)
+    {
+        try
+        {
+            // 1. Önce mevcut çalışmayı durdur (varsa)
+            await StopGroupAsync(groupId, flowItemExecutionId);
+
+            // 2. Grubu flow context'i ile tekrar başlat
+            return await StartGroupAsync(groupId, "Manual-Restart", flowItemId, flowItemExecutionId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[RestartGroupInFlowAsync] Error: {ex.Message}");
+            return false;
         }
     }
 
@@ -2975,6 +3174,113 @@ public class TaskManagementService : ITaskManagementService
                 }
                 catch (Exception)
                 {
+                }
+            }
+        }
+    }
+
+    public async Task CheckAndTriggerScheduledFlowsAsync()
+    {
+        var activeSchedules = await _dataService.GetActiveFlowSchedulesAsync();
+        var now = DateTime.UtcNow;
+        var nowLocal = DateTime.Now; // Yerel saat için
+
+        Console.WriteLine($"[Flow Timer] Running at {nowLocal}, Active Schedules Count: {activeSchedules.Count}");
+
+        if (activeSchedules.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var schedule in activeSchedules)
+        {
+            bool shouldRun = false;
+            var startTimeToday = nowLocal.Date.Add(schedule.StartTime);
+
+            Console.WriteLine($"[Flow Timer] Checking schedule for Flow: {schedule.FlowItemId}, StartTime: {schedule.StartTime}, LocalNow: {nowLocal.ToShortTimeString()}");
+
+            // Bugün için execution history var mı kontrol et
+            bool hasRunToday = false;
+            FlowExecutionHistory? latestRunToday = null;
+
+            var flowHistories = await _executionHistoryService.GetFlowExecutionHistoriesAsync(flowItemId: schedule.FlowItemId);
+            latestRunToday = flowHistories.FirstOrDefault(h => h.StartTime.Date == nowLocal.Date);
+            hasRunToday = latestRunToday != null;
+            
+            if (hasRunToday)
+            {
+                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} already has a run today at {latestRunToday?.StartTime}");
+            }
+
+            // Başlangıç saati bugün geçtiyse kontrol et
+            if (nowLocal >= startTimeToday)
+            {
+                if (schedule.LastRunTime == null)
+                {
+                    Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has no LastRunTime, should run.");
+                    shouldRun = true;
+                }
+                else
+                {
+                    var lastRunLocal = schedule.LastRunTime.Value.ToLocalTime();
+                    Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} LastRunLocal: {lastRunLocal}, HasRunToday: {hasRunToday}");
+
+                    switch (schedule.WorkPeriod)
+                    {
+                        case WorkPeriod.Daily:
+                            if (!hasRunToday)
+                            {
+                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has not run today, should run.");
+                                shouldRun = true;
+                            }
+                            else if (lastRunLocal.Date < nowLocal.Date)
+                            {
+                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run was before today, should run.");
+                                shouldRun = true;
+                            }
+                            else if (lastRunLocal.Date == nowLocal.Date && lastRunLocal < startTimeToday)
+                            {
+                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run today was before scheduled time, should run.");
+                                shouldRun = true;
+                            }
+                            break;
+
+                        case WorkPeriod.Weekly:
+                            var startOfWeek = nowLocal.Date.AddDays(-(int)nowLocal.DayOfWeek);
+                            var lastRunStartOfWeek = lastRunLocal.Date.AddDays(-(int)lastRunLocal.DayOfWeek);
+                            if (lastRunStartOfWeek < startOfWeek) shouldRun = true;
+                            break;
+
+                        case WorkPeriod.Monthly:
+                            if (lastRunLocal.Year < nowLocal.Year || (lastRunLocal.Year == nowLocal.Year && lastRunLocal.Month < nowLocal.Month)) shouldRun = true;
+                            break;
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} scheduled time {startTimeToday.ToShortTimeString()} not reached yet.");
+            }
+
+            if (shouldRun)
+            {
+                Console.WriteLine($"[Flow Timer] Triggering Flow: {schedule.FlowItemId}");
+                try
+                {
+                    var startResult = await StartFlowAsync(schedule.FlowItemId, "System");
+                    Console.WriteLine($"[Flow Timer] StartFlowAsync result for {schedule.FlowItemId}: {startResult}");
+                    
+                    if (startResult)
+                    {
+                        schedule.LastRunTime = now;
+                        await _dataService.UpdateFlowScheduleAsync(schedule);
+                        Console.WriteLine($"[Flow Timer] Updated LastRunTime for {schedule.FlowItemId} via DataService.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Flow Timer] CRITICAL ERROR triggering flow {schedule.FlowItemId}: {ex.Message}");
+                    Console.WriteLine(ex.StackTrace);
                 }
             }
         }

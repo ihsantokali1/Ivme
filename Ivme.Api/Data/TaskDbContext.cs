@@ -24,6 +24,8 @@ public class TaskDbContext : DbContext
     public DbSet<FlowGroupAssignment> FlowGroupAssignments { get; set; }
     public DbSet<FlowSchedule> FlowSchedules { get; set; }
     public DbSet<FlowExecutionHistory> FlowExecutionHistories { get; set; }
+    public DbSet<DiscoveryDatabase> DiscoveryDatabases { get; set; }
+    public DbSet<TaskTableDependency> TaskTableDependencies { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +56,7 @@ public class TaskDbContext : DbContext
                 .HasDefaultValue(TaskSourceType.Manual); // Eski kayıtlar için default değer
             entity.Property(e => e.StoredProcedureName).HasMaxLength(200);
             entity.Property(e => e.StoredProcedureSchema).HasMaxLength(50);
+            entity.Property(e => e.StoredProcedureDatabase).HasMaxLength(100);
             entity.Property(e => e.IsActive)
                 .HasDefaultValue(true); // Eski kayıtlar için default değer
             
@@ -139,6 +142,8 @@ public class TaskDbContext : DbContext
             entity.Property(e => e.TaskItemId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.GroupId).HasMaxLength(50);
             entity.Property(e => e.GroupExecutionId).HasMaxLength(50);
+            entity.Property(e => e.FlowItemId).HasMaxLength(50);
+            entity.Property(e => e.FlowItemExecutionId).HasMaxLength(50);
             entity.Property(e => e.FinalStatus).HasConversion<string>().HasMaxLength(20);
             entity.Property(e => e.ErrorMessage).HasMaxLength(2000);
             
@@ -164,6 +169,8 @@ public class TaskDbContext : DbContext
             entity.HasIndex(e => e.TaskItemId);
             entity.HasIndex(e => e.GroupId);
             entity.HasIndex(e => e.GroupExecutionId);
+            entity.HasIndex(e => e.FlowItemId);
+            entity.HasIndex(e => e.FlowItemExecutionId);
             entity.HasIndex(e => e.StartTime);
         });
 
@@ -175,7 +182,11 @@ public class TaskDbContext : DbContext
             entity.Property(e => e.Id).HasMaxLength(50);
             entity.Property(e => e.GroupId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.TriggeredBy).HasMaxLength(200).IsRequired(false);
+            entity.Property(e => e.FlowItemId).HasMaxLength(50);
+            entity.Property(e => e.FlowItemExecutionId).HasMaxLength(50);
             entity.HasIndex(e => e.GroupId);
+            entity.HasIndex(e => e.FlowItemId);
+            entity.HasIndex(e => e.FlowItemExecutionId);
             entity.HasIndex(e => e.StartTime);
         });
 
@@ -276,6 +287,33 @@ public class TaskDbContext : DbContext
             entity.HasIndex(e => e.FlowItemId);
             // StartTime üzerinde index (sorgulama performansı için)
             entity.HasIndex(e => e.StartTime);
+        });
+
+        // DiscoveryDatabase
+        modelBuilder.Entity<DiscoveryDatabase>(entity =>
+        {
+            entity.ToTable("DiscoveryDatabases");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.DatabaseName).HasMaxLength(100).IsRequired();
+            entity.HasIndex(e => e.DatabaseName).IsUnique();
+        });
+        
+        // TaskTableDependency
+        modelBuilder.Entity<TaskTableDependency>(entity =>
+        {
+            entity.ToTable("TaskTableDependencies");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(50);
+            entity.Property(e => e.TaskItemId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DatabaseName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.SchemaName).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ProcedureName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.TableName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.UsageType).HasMaxLength(100).IsRequired();
+            
+            entity.HasIndex(e => e.TaskItemId);
+            entity.HasIndex(e => e.TableName);
         });
 
     }
