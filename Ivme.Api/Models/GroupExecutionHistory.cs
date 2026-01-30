@@ -17,6 +17,7 @@ public class GroupExecutionHistory
     public string? TriggeredBy { get; set; } // Schedule, Manual, vb.
     public string? FlowItemId { get; set; } // Hangi akışa ait olduğu
     public string? FlowItemExecutionId { get; set; } // Hangi akış execution'ına ait olduğu
+    public TaskItemStatus Status { get; set; } = TaskItemStatus.Running;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

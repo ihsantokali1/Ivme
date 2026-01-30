@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { taskGroupsApi, taskItemsApi, groupTaskAssignmentsApi, executionHistoryApi } from '../services/api';
-import type { TaskGroup, TaskItem, GroupTaskAssignment, GroupExecutionHistory, TaskExecutionHistory } from '../services/api';
+import type { TaskGroup, TaskItem, GroupTaskAssignment, GroupExecutionHistory } from '../services/api';
 import { calculateTaskLevels } from '../utils/taskSorting';
 
 // Task durumuna göre renk belirleme (ManagementPage ile senkronize)
@@ -159,7 +159,7 @@ export default function TVPage() {
   const [groups, setGroups] = useState<TaskGroup[]>([]);
   const [taskItems, setTaskItems] = useState<TaskItem[]>([]);
   const [groupExecutions, setGroupExecutions] = useState<GroupExecutionHistory[]>([]);
-  const [taskExecutions, setTaskExecutions] = useState<Map<string, TaskExecutionHistory[]>>(new Map());
+  const [taskStatuses, setTaskStatuses] = useState<Map<string, Record<string, { status: string; errorMessage?: string }>>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -194,29 +194,23 @@ export default function TVPage() {
       setTaskItems(taskItemsData);
       setGroupExecutions(executionsData);
 
-      // Her grup execution için task execution'ları yükle
-      const taskExecutionsMap = new Map<string, TaskExecutionHistory[]>();
-      for (const groupExec of executionsData) {
+      // Her grup execution için task durumlarını yükle (N+1 engelleme ve İzolasyon)
+      const taskStatusesMap = new Map<string, Record<string, { status: string; errorMessage?: string }>>();
+
+      const statusPromises = executionsData.map(async (groupExec) => {
         try {
-          const taskExecs = await executionHistoryApi.getTaskHistories({
-            groupId: groupExec.groupId,
-            startDate: groupExec.startTime,
-            endDate: groupExec.endTime ?? tomorrow.toISOString(),
+          // Yeni eklediğimiz groupExecutionId filtresini kullanarak tam izolasyon sağlıyoruz
+          const statuses = await executionHistoryApi.getTodayStatusesWithErrors({
+            groupExecutionId: groupExec.id
           });
-          // Bu group execution'a ait task execution'ları filtrele
-          // (GroupExecutionId ile eşleşenleri al)
-          const filteredExecs = taskExecs.filter(te => {
-            // Task execution'ların groupExecutionId'si yoksa, startTime'a göre filtrele
-            const taskStartTime = new Date(te.startTime);
-            const groupStartTime = new Date(groupExec.startTime);
-            return taskStartTime >= groupStartTime;
-          });
-          taskExecutionsMap.set(groupExec.id, filteredExecs);
+          taskStatusesMap.set(groupExec.id, statuses);
         } catch (err) {
-          console.error(`Task executions yüklenirken hata (${groupExec.id}):`, err);
+          console.error(`Task statuses yüklenirken hata (${groupExec.id}):`, err);
         }
-      }
-      setTaskExecutions(taskExecutionsMap);
+      });
+
+      await Promise.all(statusPromises);
+      setTaskStatuses(taskStatusesMap);
     } catch (err) {
       console.error('Veri yüklenirken hata:', err);
     } finally {
@@ -297,7 +291,7 @@ export default function TVPage() {
               groups={groups}
               taskItems={taskItems}
               groupExecutions={groupExecutions}
-              taskExecutions={taskExecutions}
+              taskStatuses={taskStatuses}
             />
           </div>
         ))}
@@ -312,13 +306,13 @@ function TVFlowView({
   groups,
   taskItems,
   groupExecutions,
-  taskExecutions,
+  taskStatuses,
 }: {
   groupId: string;
   groups: TaskGroup[];
   taskItems: TaskItem[];
   groupExecutions: GroupExecutionHistory[];
-  taskExecutions: Map<string, TaskExecutionHistory[]>;
+  taskStatuses: Map<string, Record<string, { status: string; errorMessage?: string }>>;
 }) {
   const [, setAssignments] = useState<GroupTaskAssignment[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -329,7 +323,7 @@ function TVFlowView({
 
   useEffect(() => {
     loadFlow();
-  }, [groupId, groupExecutions, taskExecutions, taskItems]);
+  }, [groupId, groupExecutions, taskStatuses, taskItems]);
 
   const loadFlow = async () => {
     try {
@@ -344,7 +338,7 @@ function TVFlowView({
         return;
       }
 
-      const taskExecs = taskExecutions.get(groupExec.id) || [];
+      const currentGroupTaskStatuses = taskStatuses.get(groupExec.id) || {};
 
       // Task seviyelerini hesapla
       const groupTasks = assignmentsData
@@ -381,10 +375,9 @@ function TVFlowView({
           const task = taskItems.find(t => t.id === assignment.taskItemId);
           if (!task) return;
 
-          // Bu task için en son execution'ı bul
-          const latestExecution = taskExecs
-            .filter(e => e.taskItemId === task.id)
-            .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+          // Bu task için statüyü bellekten al
+          const taskStatusKey = `${groupId}-${task.id}`;
+          const statusInfo = currentGroupTaskStatuses[taskStatusKey];
 
           const taskLevel = taskLevels.get(task.id) || 0;
           const nodesInLevel = levelAssignments.length;
@@ -405,8 +398,8 @@ function TVFlowView({
               assignment,
               order: assignment.order,
               level: taskLevel,
-              status: latestExecution?.finalStatus || assignment.status || 'Pending',
-              progress: latestExecution?.progress || assignment.progress || 0,
+              status: statusInfo?.status || assignment.status || 'Pending',
+              progress: assignment.progress || 0, // progress şimdilik assignment'tan geliyor
             },
           });
         });

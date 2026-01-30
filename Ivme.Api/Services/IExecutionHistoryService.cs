@@ -12,26 +12,47 @@ public interface IExecutionHistoryService
     Task UpdateTaskExecutionStatusAsync(string executionId, TaskItemStatus status);
     
     Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null);
-    Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors);
+    Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, TaskItemStatus? status = null, bool isFinished = true);
     
     // Flow Execution
     Task<FlowExecutionHistory> StartFlowExecutionAsync(string flowItemId, string triggeredBy = "Manual");
     Task CompleteFlowExecutionAsync(string executionId, string status = "Completed");
     Task<FlowExecutionHistory?> GetActiveFlowExecutionAsync(string flowItemId);
+    Task TerminateActiveExecutionsAsync(string flowItemId, string reason);
     Task<FlowExecutionHistory?> GetFlowExecutionHistoryAsync(string executionId);
     Task<List<FlowExecutionHistory>> GetFlowExecutionHistoriesAsync(string? flowItemId = null, DateTime? startDate = null, DateTime? endDate = null);
     
-    Task<List<TaskExecutionHistory>> GetTaskExecutionHistoriesAsync(string? taskItemId = null, string? groupId = null, DateTime? startDate = null, DateTime? endDate = null);
-    Task<List<GroupExecutionHistory>> GetGroupExecutionHistoriesAsync(string? groupId = null, DateTime? startDate = null, DateTime? endDate = null);
+    Task<List<TaskExecutionHistory>> GetTaskExecutionHistoriesAsync(string? taskItemId = null, string? groupId = null, string? groupExecutionId = null, string? flowItemExecutionId = null, DateTime? startDate = null, DateTime? endDate = null);
+    Task<List<GroupExecutionHistory>> GetGroupExecutionHistoriesAsync(string? groupId = null, string? flowItemExecutionId = null, DateTime? startDate = null, DateTime? endDate = null);
     
     Task<TaskExecutionHistory?> GetTaskExecutionHistoryAsync(string executionId);
     Task<GroupExecutionHistory?> GetGroupExecutionHistoryAsync(string executionId);
     
     /// <summary>
+    /// Aktif execution'ı task item ID'ye göre bul
+    /// </summary>
+    Task<TaskExecutionHistory?> GetActiveTaskExecutionAsync(string taskItemId);
+
+    /// <summary>
     /// Aktif group execution'ı bul
     /// </summary>
     Task<GroupExecutionHistory?> GetActiveGroupExecutionAsync(string groupId);
+
+    /// <summary>
+    /// Tüm aktif grup execution'larını getir
+    /// </summary>
+    Task<List<GroupExecutionHistory>> GetAllActiveGroupExecutionsAsync();
+
+    /// <summary>
+    /// Tüm aktif task execution'larını getir
+    /// </summary>
+    Task<List<TaskExecutionHistory>> GetAllActiveTaskExecutionsAsync();
     
+    /// <summary>
+    /// Tüm aktif flow execution'larını getir
+    /// </summary>
+    Task<List<FlowExecutionHistory>> GetAllActiveFlowExecutionsAsync();
+
     /// <summary>
     /// Bugün başlamış en son group execution'ı bul
     /// </summary>
@@ -45,12 +66,12 @@ public interface IExecutionHistoryService
     /// <summary>
     /// Bugün başlamış task'ların son statülerini grup bazında getirir
     /// </summary>
-    Task<Dictionary<string, TaskItemStatus>> GetTodayTaskStatusesByGroupAsync();
+    Task<Dictionary<string, TaskItemStatus>> GetTodayTaskStatusesByGroupAsync(string? groupExecutionId = null, string? flowItemExecutionId = null);
     
     /// <summary>
     /// Bugün başlamış task'ların son statülerini ve error message'larını grup bazında getirir
     /// </summary>
-    Task<Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>> GetTodayTaskStatusesWithErrorsByGroupAsync();
+    Task<Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>> GetTodayTaskStatusesWithErrorsByGroupAsync(string? groupExecutionId = null, string? flowItemExecutionId = null);
 
     /// <summary>
     /// Bugün başlamış flow'ların son statülerini getirir

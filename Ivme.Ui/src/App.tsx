@@ -208,7 +208,7 @@ function AppContent() {
                 {canViewPage(user?.role, 'groups') && (
                   <NavItem label="2. Grup Tanımlama" active={activeTab === 'groups'} onClick={() => setActiveTab('groups')} />
                 )}
-                {canViewPage(user?.role, 'flows') && (
+                {canViewPage(user?.role, 'flow') && (
                   <NavItem label="3. Akış Tanımlama" active={activeTab === 'flows'} onClick={() => setActiveTab('flows')} />
                 )}
               </NavDropdown>

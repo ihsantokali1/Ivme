@@ -53,11 +53,11 @@ const statusLabels: Record<string, string> = {
 };
 
 // Custom node component
-const DashboardTaskNode = ({ data, groupExecutions }: { 
-  data: { 
-    task: TaskItem; 
-    assignment: GroupTaskAssignment; 
-    order: number; 
+const DashboardTaskNode = ({ data, groupExecutions }: {
+  data: {
+    task: TaskItem;
+    assignment: GroupTaskAssignment;
+    order: number;
     level: number;
     status?: string;
     progress?: number;
@@ -74,7 +74,7 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<TaskExecutionHistory[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
-  
+
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Bu işi durdurmak istediğinize emin misiniz?')) {
@@ -100,7 +100,7 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
       try {
         // Önce groupExecutionId'yi bul
         let finalGroupExecutionId = data.groupExecutionId;
-        
+
         // Eğer groupExecutionId yoksa, groupExecutions'tan bul
         if (!finalGroupExecutionId && groupExecutions && data.assignment?.groupId) {
           const latestGroupExecution = groupExecutions
@@ -108,18 +108,18 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
             .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
           finalGroupExecutionId = latestGroupExecution?.id;
         }
-        
+
         if (!finalGroupExecutionId) {
           setLogs([]);
           setLoadingLogs(false);
           return;
         }
-        
+
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        
+
         // Bugünkü tüm execution'ları al
         const allHistories = await executionHistoryApi.getTaskHistories({
           taskItemId: data.task.id,
@@ -127,12 +127,12 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
           startDate: today.toISOString(),
           endDate: tomorrow.toISOString()
         });
-        
+
         // Sadece son grup execution'ına ait olanları filtrele
         const relevantHistories = allHistories
           .filter(history => history.groupExecutionId === finalGroupExecutionId)
           .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-        
+
         setLogs(relevantHistories);
       } catch (err) {
         console.error('Log yükleme hatası:', err);
@@ -154,11 +154,11 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
     if (!confirm('Bu işi başarılı olarak işaretlemek istediğinize emin misiniz? Bu işlem sonrası bağımlı işler başlayabilecek.')) {
       return;
     }
-    
+
     // ÖNEMLİ: groupExecutionId ve groupId kontrolü
     let finalGroupExecutionId = data.groupExecutionId;
     let finalGroupId = data.assignment?.groupId;
-    
+
     // Eğer groupExecutionId yoksa, groupExecutions'tan bul
     if (!finalGroupExecutionId && groupExecutions && data.assignment?.groupId) {
       const latestGroupExecution = groupExecutions
@@ -166,17 +166,17 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
       finalGroupExecutionId = latestGroupExecution?.id;
     }
-    
+
     if (!finalGroupExecutionId) {
       alert('Hata: GroupExecutionId bulunamadı. Lütfen sayfayı yenileyin ve tekrar deneyin.');
       return;
     }
-    
+
     if (!finalGroupId) {
       alert('Hata: GroupId bulunamadı. Lütfen sayfayı yenileyin ve tekrar deneyin.');
       return;
     }
-    
+
     try {
       setActionLoading(true);
       await taskItemsApi.markAsSuccess(data.task.id, finalGroupExecutionId, finalGroupId);
@@ -198,11 +198,11 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
       setActionLoading(false);
     }
   };
-  
+
   return (
-    <div 
+    <div
       className="px-3 py-2.5 bg-white dark:bg-gray-800 rounded-lg shadow-md min-w-[200px] max-w-[240px] hover:shadow-lg transition-shadow relative"
-      style={{ 
+      style={{
         borderWidth: `${borderWidth}px`,
         borderColor: statusColor,
         borderStyle: 'solid',
@@ -213,20 +213,20 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
         type="source"
         position={Position.Right}
         id="source"
-        style={{ 
+        style={{
           background: statusColor,
           width: 10,
           height: 10,
           border: '2px solid white',
         }}
       />
-      
+
       {/* Target handle */}
       <Handle
         type="target"
         position={Position.Left}
         id="target"
-        style={{ 
+        style={{
           background: statusColor,
           width: 10,
           height: 10,
@@ -238,20 +238,20 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
         <div className="text-sm font-semibold text-gray-900 dark:text-white flex-1">
           {data.task.name}
         </div>
-        <div 
+        <div
           className="ml-2 px-1.5 py-0.5 rounded text-xs font-medium text-white"
           style={{ backgroundColor: statusColor }}
         >
           #{data.order + 1}
         </div>
       </div>
-      
+
       {data.status && (
         <div className="text-xs font-semibold mb-1.5" style={{ color: statusColor }}>
           {statusLabels[data.status] || data.status}
         </div>
       )}
-      
+
       {data.errorMessage && (
         <div className="text-xs text-red-600 dark:text-red-400 mb-1.5 font-medium line-clamp-2">
           ⚠️ {data.errorMessage}
@@ -277,7 +277,7 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
             {actionLoading ? 'Durduruluyor...' : 'Durdur'}
           </ProtectedButton>
         )}
-        
+
         {/* Başarılı Say butonu - sadece Failed durumunda göster */}
         {data.status === 'Failed' && (
           <ProtectedButton
@@ -289,7 +289,7 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
             {actionLoading ? 'İşaretleniyor...' : 'Başarılı Say'}
           </ProtectedButton>
         )}
-        
+
         {/* Loglar butonu */}
         <button
           onClick={(e) => {
@@ -299,14 +299,14 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
           className="w-full px-2 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded text-xs font-medium transition-colors flex items-center justify-between"
         >
           <span>Loglar</span>
-          <svg 
+          <svg
             className={`w-3 h-3 transition-transform ${showLogs ? 'rotate-180' : ''}`}
             fill="none" stroke="currentColor" viewBox="0 0 24 24"
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        
+
         {/* Collapsible Log Bölümü */}
         {showLogs && (
           <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs max-h-40 overflow-y-auto">
@@ -319,7 +319,7 @@ const DashboardTaskNode = ({ data, groupExecutions }: {
                 {logs.map((log) => (
                   <div key={log.id} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span 
+                      <span
                         className="px-1.5 py-0.5 rounded text-xs font-medium text-white"
                         style={{ backgroundColor: getStatusColor(log.finalStatus) }}
                       >
@@ -366,13 +366,13 @@ interface TaskDashboardViewProps {
 }
 
 
-export default function TaskDashboardView({ 
-  tasks, 
-  assignments, 
-  todayStatuses = {}, 
-  todayStatusesWithErrors = {}, 
+export default function TaskDashboardView({
+  tasks,
+  assignments,
+  todayStatuses = {},
+  todayStatusesWithErrors = {},
   onUpdate,
-  groups = [] 
+  groups = []
 }: TaskDashboardViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [activeGroupIds, setActiveGroupIds] = useState<string[]>([]);
@@ -386,23 +386,23 @@ export default function TaskDashboardView({
   const [isStarting, setIsStarting] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<string>('');
   const [loadingExecutionLogs, setLoadingExecutionLogs] = useState(false);
-  
+
   // nodeTypes'i memoize et (React Flow uyarısını önlemek için)
   // groupExecutions prop'unu DashboardTaskNode'a geçirmek için
   // useRef kullanarak groupExecutions'ı saklıyoruz, böylece callback her zaman aynı referansı kullanır
   const groupExecutionsRef = useRef<GroupExecutionHistory[]>(groupExecutions);
-  
+
   // groupExecutions değiştiğinde ref'i güncelle
   useEffect(() => {
     groupExecutionsRef.current = groupExecutions;
   }, [groupExecutions]);
-  
+
   // createDashboardTaskNode'u useCallback ile memoize et, ama dependency olmadan
   // groupExecutions'ı ref'ten alıyoruz, böylece callback referansı değişmez
   const createDashboardTaskNode = useCallback((props: any) => {
     return <DashboardTaskNode {...props} groupExecutions={groupExecutionsRef.current} />;
   }, []); // Boş dependency array - callback referansı hiç değişmez
-  
+
   const memoizedNodeTypes = useMemo(() => ({
     dashboardTask: createDashboardTaskNode,
   }), [createDashboardTaskNode]);
@@ -448,7 +448,7 @@ export default function TaskDashboardView({
 
         // Bugün çalışacak grupları bul (schedule'a göre)
         const todayScheduledGroupIds: string[] = [];
-        
+
         activeSchedules.forEach(schedule => {
           // Schedule'ın bugün çalışıp çalışmayacağını kontrol et
           // Şimdilik sadece Daily schedule'ları kontrol ediyoruz
@@ -460,7 +460,7 @@ export default function TaskDashboardView({
             const hasExecutionToday = executions.some(
               exec => exec.groupId === schedule.groupId
             );
-            
+
             // Eğer bugün çalışmamışsa, schedule'a göre çalışacak demektir
             if (!hasExecutionToday) {
               todayScheduledGroupIds.push(schedule.groupId);
@@ -472,7 +472,7 @@ export default function TaskDashboardView({
         const allActiveGroupIds = Array.from(
           new Set([...executedGroupIds, ...todayScheduledGroupIds])
         );
-        
+
         setActiveGroupIds(allActiveGroupIds);
 
         // İlk grubu otomatik seç
@@ -493,7 +493,7 @@ export default function TaskDashboardView({
 
     try {
       setIsStarting(true);
-      
+
       if (startFromTaskId === null) {
         // Baştan başlat
         await taskGroupsApi.start(selectedGroupId);
@@ -504,10 +504,10 @@ export default function TaskDashboardView({
         const task = tasks.find(t => t.id === startFromTaskId);
         alert(`Grup "${task?.name || 'seçilen task'}" task'ından başarıyla başlatıldı.`);
       }
-      
+
       setShowStartModal(false);
       setStartFromTaskId(null);
-      
+
       // Verileri yenile - parent component'in loadData fonksiyonunu çağır
       onUpdate();
     } catch (err) {
@@ -523,35 +523,35 @@ export default function TaskDashboardView({
       // Grup yoksa tüm task'ları tek bir flow'da göster
       // Tüm assignment'ları al (filtreleme yok)
       const groupAssignments = assignments;
-      
+
       if (groupAssignments.length === 0) return {};
-      
+
       // Grup assignment'larına göre task'ları bul
-      const groupTasks = tasks.filter(t => 
+      const groupTasks = tasks.filter(t =>
         groupAssignments.some(a => a.taskItemId === t.id)
       );
-      
+
       if (groupTasks.length === 0) return {};
-      
+
       const taskLevels = calculateTaskLevels(groupTasks, groupAssignments);
-      
+
       // Maksimum seviye sayısını bul
       let maxLevel = -1;
       taskLevels.forEach((level) => {
         maxLevel = Math.max(maxLevel, level);
       });
       const levelCount = maxLevel + 1; // Seviye sayısı (1-based)
-      
+
       // Container genişliğini seviye sayısına göre belirle
       // Node genişliği 320px, padding 100px (her iki tarafta 50px)
       // Minimum seviyeler arası mesafe: 350px (node genişliği + boşluk)
       const nodeWidth = 320;
       const horizontalPadding = 100;
       const minLevelSpacing = 350; // Minimum seviyeler arası mesafe
-      
+
       // Gerekli minimum genişlik: (levelCount - 1) * minLevelSpacing + nodeWidth + horizontalPadding
       const minRequiredWidth = (levelCount - 1) * minLevelSpacing + nodeWidth + horizontalPadding;
-      
+
       let containerWidth: number;
       if (levelCount >= 1 && levelCount <= 4) {
         // 1-4 seviye için minimum genişlik veya 800px (hangisi büyükse) - 6'lık grid için
@@ -560,18 +560,18 @@ export default function TaskDashboardView({
         // 5+ seviye için minimum genişlik veya 1400px (hangisi büyükse) - 12'lik grid için
         containerWidth = Math.max(minRequiredWidth, 1400);
       }
-      
+
       const availableWidth = containerWidth - horizontalPadding - nodeWidth;
-      
+
       // Seviyeler arası mesafeyi hesapla (minimum spacing'i koru)
-      const levelSpacing = levelCount > 1 
+      const levelSpacing = levelCount > 1
         ? Math.max(availableWidth / (levelCount - 1), minLevelSpacing)
         : 0;
-      
+
       // Node'ları oluştur
       const groupNodes: Node[] = [];
       const groupEdges: Edge[] = [];
-      
+
       const tasksByLevel = new Map<number, GroupTaskAssignment[]>();
       groupAssignments.forEach(assignment => {
         const task = groupTasks.find(t => t.id === assignment.taskItemId);
@@ -586,35 +586,35 @@ export default function TaskDashboardView({
 
       tasksByLevel.forEach((levelAssignments) => {
         levelAssignments.sort((a, b) => a.order - b.order);
-        
+
         levelAssignments.forEach((assignment, indexInLevel) => {
           const task = groupTasks.find(t => t.id === assignment.taskItemId);
           if (!task) return;
-          
+
           const level = taskLevels.get(task.id) || 0;
           const statusKey = `${assignment.groupId}-${assignment.taskItemId}`;
           const status = todayStatuses[statusKey];
           const statusWithError = todayStatusesWithErrors[statusKey];
           const progress = assignment.progress ?? 0;
-          
+
           const nodesInLevel = levelAssignments.length;
           const spacing = 200; // Aynı seviyedeki tasklar arası mesafe (kartlar küçüldüğü için azaltıldı)
           const startY = 100;
           const totalHeight = (nodesInLevel - 1) * spacing;
           const y = startY + (indexInLevel * spacing) - (totalHeight / 2);
-          
+
           // Seviye sayısına göre dinamik x pozisyonu
-          const x = levelCount > 1 
+          const x = levelCount > 1
             ? (level * levelSpacing) + 20  // İlk seviye 20px'den başlar (sola yaklaştırıldı: 50 -> 20)
             : 20; // Tek seviye varsa ortada
-          
+
           // ÖNEMLİ: Her assignment için kendi groupId'sine göre groupExecutionId bul
           const assignmentGroupExecution = groupExecutions
             .filter(exec => exec.groupId === assignment.groupId)
             .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
           const assignmentGroupExecutionId = assignmentGroupExecution?.id;
-          
-          
+
+
           groupNodes.push({
             id: assignment.id,
             type: 'dashboardTask',
@@ -638,7 +638,7 @@ export default function TaskDashboardView({
           });
         });
       });
-      
+
       // Edge'leri oluştur
       groupAssignments.forEach(assignment => {
         assignment.prerequisiteTaskItemIds.forEach(prereqId => {
@@ -652,7 +652,7 @@ export default function TaskDashboardView({
               targetHandle: 'target',
               type: 'smoothstep',
               animated: status === 'Running',
-              style: { 
+              style: {
                 stroke: getStatusColor(status),
                 strokeWidth: 2,
               },
@@ -669,42 +669,42 @@ export default function TaskDashboardView({
 
       return { 'all': { nodes: groupNodes, edges: groupEdges } };
     }
-    
+
     // Her grup için ayrı flow
     const flows: Record<string, { nodes: Node[]; edges: Edge[] }> = {};
-    
+
     groups.forEach(group => {
       // Her grup için tüm assignment'ları al (filtreleme yok)
       const groupAssignments = assignments.filter(
         a => a.groupId === group.id
       );
-      
+
       if (groupAssignments.length === 0) return;
-      
+
       // Grup assignment'larına göre task'ları bul
-      const groupTasks = tasks.filter(t => 
+      const groupTasks = tasks.filter(t =>
         groupAssignments.some(a => a.taskItemId === t.id)
       );
-      
+
       const taskLevels = calculateTaskLevels(groupTasks, groupAssignments);
-      
+
       // Maksimum seviye sayısını bul
       let maxLevel = -1;
       taskLevels.forEach((level) => {
         maxLevel = Math.max(maxLevel, level);
       });
       const levelCount = maxLevel + 1; // Seviye sayısı (1-based)
-      
+
       // Container genişliğini seviye sayısına göre belirle
       // Node genişliği 320px, padding 100px (her iki tarafta 50px)
       // Minimum seviyeler arası mesafe: 350px (node genişliği + boşluk)
       const nodeWidth = 320;
       const horizontalPadding = 100;
       const minLevelSpacing = 350; // Minimum seviyeler arası mesafe
-      
+
       // Gerekli minimum genişlik: (levelCount - 1) * minLevelSpacing + nodeWidth + horizontalPadding
       const minRequiredWidth = (levelCount - 1) * minLevelSpacing + nodeWidth + horizontalPadding;
-      
+
       let containerWidth: number;
       if (levelCount >= 1 && levelCount <= 4) {
         // 1-4 seviye için minimum genişlik veya 800px (hangisi büyükse) - 6'lık grid için
@@ -713,14 +713,14 @@ export default function TaskDashboardView({
         // 5+ seviye için minimum genişlik veya 1400px (hangisi büyükse) - 12'lik grid için
         containerWidth = Math.max(minRequiredWidth, 1400);
       }
-      
+
       const availableWidth = containerWidth - horizontalPadding - nodeWidth;
-      
+
       // Seviyeler arası mesafeyi hesapla (minimum spacing'i koru)
-      const levelSpacing = levelCount > 1 
+      const levelSpacing = levelCount > 1
         ? Math.max(availableWidth / (levelCount - 1), minLevelSpacing)
         : 0;
-      
+
       const groupNodes: Node[] = [];
       const groupEdges: Edge[] = [];
 
@@ -735,39 +735,39 @@ export default function TaskDashboardView({
           tasksByLevel.get(level)!.push(assignment);
         }
       });
-      
+
       tasksByLevel.forEach((levelAssignments) => {
         levelAssignments.sort((a, b) => a.order - b.order);
-        
+
         levelAssignments.forEach((assignment, indexInLevel) => {
           const task = groupTasks.find(t => t.id === assignment.taskItemId);
           if (!task) return;
-          
+
           const level = taskLevels.get(task.id) || 0;
           const statusKey = `${assignment.groupId}-${assignment.taskItemId}`;
           const status = todayStatuses[statusKey];
           const statusWithError = todayStatusesWithErrors[statusKey];
           const progress = assignment.progress ?? 0;
-          
+
           const nodesInLevel = levelAssignments.length;
           const spacing = 200; // Aynı seviyedeki tasklar arası mesafe (kartlar küçüldüğü için azaltıldı)
           const startY = 100;
           const totalHeight = (nodesInLevel - 1) * spacing;
           const y = startY + (indexInLevel * spacing) - (totalHeight / 2);
-          
+
           // Seviye sayısına göre dinamik x pozisyonu
-          const x = levelCount > 1 
+          const x = levelCount > 1
             ? (level * levelSpacing) + 20  // İlk seviye 20px'den başlar (sola yaklaştırıldı: 50 -> 20)
             : 20; // Tek seviye varsa ortada
-          
+
           // ÖNEMLİ: Her assignment için kendi groupId'sine göre groupExecutionId bul
           // assignment.groupId ile group.id eşleşmeli, ama güvenlik için assignment.groupId kullanıyoruz
           const assignmentGroupExecution = groupExecutions
             .filter(exec => exec.groupId === assignment.groupId)
             .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
           const assignmentGroupExecutionId = assignmentGroupExecution?.id;
-          
-          
+
+
           groupNodes.push({
             id: assignment.id,
             type: 'dashboardTask',
@@ -792,7 +792,7 @@ export default function TaskDashboardView({
           });
         });
       });
-      
+
       // Edge'leri oluştur
       groupAssignments.forEach(assignment => {
         assignment.prerequisiteTaskItemIds.forEach(prereqId => {
@@ -800,7 +800,7 @@ export default function TaskDashboardView({
           if (prereqAssignment) {
             const prereqStatusKey = `${prereqAssignment.groupId}-${prereqAssignment.taskItemId}`;
             const prereqStatus = todayStatuses[prereqStatusKey];
-            
+
             groupEdges.push({
               id: `e-${prereqAssignment.id}-${assignment.id}`,
               source: prereqAssignment.id,
@@ -809,7 +809,7 @@ export default function TaskDashboardView({
               targetHandle: 'target',
               type: 'smoothstep',
               animated: prereqStatus === 'Running',
-              style: { 
+              style: {
                 stroke: getStatusColor(prereqStatus),
                 strokeWidth: 2,
               },
@@ -823,10 +823,10 @@ export default function TaskDashboardView({
           }
         });
       });
-      
+
       flows[group.id] = { nodes: groupNodes, edges: groupEdges };
     });
-    
+
     return flows;
   }, [tasks, assignments, groups, todayStatuses, todayStatusesWithErrors, groupExecutions, onUpdate]);
 
@@ -885,9 +885,9 @@ export default function TaskDashboardView({
 
       // Task execution'larını kronolojik sıraya göre sırala
       const relevantTaskHistories = taskHistories
-        .filter(history => (history.groupExecutionId === latestGroupExecution.id) || 
-               (history.groupId === selectedGroupId && 
-                new Date(history.startTime) >= new Date(latestGroupExecution.startTime)))
+        .filter(history => (history.groupExecutionId === latestGroupExecution.id) ||
+          (history.groupId === selectedGroupId &&
+            new Date(history.startTime) >= new Date(latestGroupExecution.startTime)))
         .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
       // Her task execution için log satırı oluştur
@@ -895,14 +895,14 @@ export default function TaskDashboardView({
         const task = tasks.find(t => t.id === history.taskItemId);
         const taskName = task?.name || 'Bilinmeyen Task';
         const startTime = new Date(history.startTime).toLocaleString('tr-TR');
-        
+
         // Başlangıç logu
         logLines.push(`${startTime} ${taskName} taskı çalışmaya başladı`);
 
         // Bitiş logu (eğer varsa)
         if (history.endTime) {
           const endTime = new Date(history.endTime).toLocaleString('tr-TR');
-          
+
           if (history.finalStatus === 'Failed') {
             logLines.push(`${endTime} ${taskName} taskı hatalı bitti`);
           } else if (history.finalStatus === 'Completed') {
@@ -948,31 +948,31 @@ export default function TaskDashboardView({
         .filter(exec => exec.groupId === groupId)
         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
       const schedule = schedules.find(s => s.groupId === groupId);
-      
+
       // Grubun gerçek task sayısını assignments üzerinden al
       const groupAssignments = assignments.filter(a => a.groupId === groupId);
       const realTotalTasks = groupAssignments.length;
-      
+
       // Bugün çalışan task'ların statülerini hesapla
       let realCompletedTasks = 0;
       let realFailedTasks = 0;
-      
+
       groupAssignments.forEach(assignment => {
         const statusKey = `${groupId}-${assignment.taskItemId}`;
         const status = todayStatuses[statusKey];
-        
+
         if (status === 'Completed') {
           realCompletedTasks++;
         } else if (status === 'Failed') {
           realFailedTasks++;
         }
       });
-      
+
       // Eğer execution yoksa ama schedule varsa, bu grup bugün çalışacak demektir
       const isScheduled = !latestExecution && schedule !== undefined;
       const isRunning = latestExecution?.endTime === null || latestExecution?.endTime === undefined;
       const allTasksFinished = (realCompletedTasks + realFailedTasks) === realTotalTasks && realTotalTasks > 0;
-      
+
       // Grup statüsünü belirle (gerçek task sayılarına göre)
       let groupStatus: 'running' | 'completed' | 'failed' | 'partial' | 'scheduled' = 'scheduled';
       if (latestExecution) {
@@ -998,7 +998,7 @@ export default function TaskDashboardView({
       } else if (isScheduled) {
         groupStatus = 'scheduled';
       }
-      
+
       return {
         id: groupId,
         name: group?.name || 'Bilinmeyen Grup',
@@ -1030,199 +1030,199 @@ export default function TaskDashboardView({
       <div className="flex gap-4 flex-1 min-h-0">
         {/* Sol taraf: Grup listesi */}
         <div className="w-64 flex-shrink-0 bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 overflow-y-auto">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Aktif Gruplar
-        </h3>
-        <div className="space-y-2">
-          {activeGroupsWithNames.map((group) => {
-            // Statüye göre renk belirle
-            const getStatusColor = (status: string) => {
-              if (selectedGroupId === group.id) {
-                // Seçili grup için daha koyu tonlar
-                switch (status) {
-                  case 'running':
-                    return 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100 border-2 border-green-400';
-                  case 'completed':
-                    return 'bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100 border-2 border-blue-400';
-                  case 'failed':
-                    return 'bg-red-200 dark:bg-red-800 text-red-900 dark:text-red-100 border-2 border-red-400';
-                  case 'partial':
-                    return 'bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100 border-2 border-orange-400';
-                  case 'scheduled':
-                    return 'bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 border-2 border-yellow-400';
-                  default:
-                    return 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100';
-                }
-              } else {
-                // Seçili olmayan grup için açık tonlar
-                switch (status) {
-                  case 'running':
-                    return 'bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-green-500';
-                  case 'completed':
-                    return 'bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-blue-500';
-                  case 'failed':
-                    return 'bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-red-500';
-                  case 'partial':
-                    return 'bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-orange-500';
-                  case 'scheduled':
-                    return 'bg-yellow-50 dark:bg-yellow-900/30 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-yellow-500';
-                  default:
-                    return 'bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100';
-                }
-              }
-            };
-
-        return (
-            <button
-              key={group.id}
-              onClick={() => setSelectedGroupId(group.id)}
-              className={`w-full text-left p-3 rounded-lg transition-colors ${getStatusColor(group.status)}`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium truncate">{group.name}</span>
-                <div className="flex items-center gap-1">
-                  {group.status === 'running' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2" title="Çalışıyor"></span>
-                  )}
-                  {group.status === 'completed' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full ml-2" title="Tamamlandı"></span>
-                  )}
-                  {group.status === 'failed' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-red-500 rounded-full ml-2" title="Başarısız"></span>
-                  )}
-                  {group.status === 'partial' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-orange-500 rounded-full ml-2" title="Kısmen Tamamlandı"></span>
-                  )}
-                  {group.status === 'scheduled' && (
-                    <span className="flex-shrink-0 w-2 h-2 bg-yellow-500 rounded-full ml-2" title="Planlanmış"></span>
-                  )}
-                      </div>
-                    </div>
-              {group.totalTasks > 0 && (
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  {group.completedTasks}/{group.totalTasks} tamamlandı
-                  {group.failedTasks > 0 && `, ${group.failedTasks} başarısız`}
-                      </div>
-                    )}
-              {group.isScheduled && !group.startTime && group.scheduleStartTime && (
-                <div className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
-                  Planlanan: {group.scheduleStartTime}
-                        </div>
-              )}
-              {group.startTime && (
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  Başlangıç: {new Date(group.startTime).toLocaleTimeString('tr-TR')}
-                </div>
-              )}
-              {group.groupExecutionId && (
-                <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
-                  Exec ID: {group.groupExecutionId.substring(0, 8)}...
-                </div>
-              )}
-              {group.endTime && (
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  Bitiş: {new Date(group.endTime).toLocaleTimeString('tr-TR')}
-                </div>
-              )}
-            </button>
-            );
-          })}
-        </div>
-                        </div>
-
-      {/* Sağ taraf: Seçilen grubun flow'u */}
-      <div className="flex-1 flex flex-col min-h-0">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-            {selectedGroupId ? activeGroupsWithNames.find(g => g.id === selectedGroupId)?.name : 'Grup Seçin'}
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Aktif Gruplar
           </h3>
-          <div className="flex items-center gap-4">
-            {selectedGroupId && (
-                            <button 
-                onClick={() => setShowStartModal(true)}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-                disabled={isStarting}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {isStarting ? 'Başlatılıyor...' : 'Grup Başlat'}
-                            </button>
-            )}
-            <div className="flex gap-2 text-xs flex-wrap">
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Running') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Çalışıyor</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Ready') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Hazır</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Pending') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Beklemede</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('WaitingRetry') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Yeniden Deneme</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Completed') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Tamamlandı</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('MarkedAsSuccess') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Başarılı Sayıldı</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Failed') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Başarısız</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Paused') }}></div>
-              <span className="text-gray-600 dark:text-gray-400">Duraklatıldı</span>
-            </div>
+          <div className="space-y-2">
+            {activeGroupsWithNames.map((group) => {
+              // Statüye göre renk belirle
+              const getStatusColor = (status: string) => {
+                if (selectedGroupId === group.id) {
+                  // Seçili grup için daha koyu tonlar
+                  switch (status) {
+                    case 'running':
+                      return 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100 border-2 border-green-400';
+                    case 'completed':
+                      return 'bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100 border-2 border-blue-400';
+                    case 'failed':
+                      return 'bg-red-200 dark:bg-red-800 text-red-900 dark:text-red-100 border-2 border-red-400';
+                    case 'partial':
+                      return 'bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100 border-2 border-orange-400';
+                    case 'scheduled':
+                      return 'bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 border-2 border-yellow-400';
+                    default:
+                      return 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+                  }
+                } else {
+                  // Seçili olmayan grup için açık tonlar
+                  switch (status) {
+                    case 'running':
+                      return 'bg-green-50 dark:bg-green-900/30 hover:bg-green-100 dark:hover:bg-green-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-green-500';
+                    case 'completed':
+                      return 'bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-blue-500';
+                    case 'failed':
+                      return 'bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-red-500';
+                    case 'partial':
+                      return 'bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-orange-500';
+                    case 'scheduled':
+                      return 'bg-yellow-50 dark:bg-yellow-900/30 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 text-gray-900 dark:text-gray-100 border-l-4 border-yellow-500';
+                    default:
+                      return 'bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100';
+                  }
+                }
+              };
+
+              return (
+                <button
+                  key={group.id}
+                  onClick={() => setSelectedGroupId(group.id)}
+                  className={`w-full text-left p-3 rounded-lg transition-colors ${getStatusColor(group.status)}`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium truncate">{group.name}</span>
+                    <div className="flex items-center gap-1">
+                      {group.status === 'running' && (
+                        <span className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2" title="Çalışıyor"></span>
+                      )}
+                      {group.status === 'completed' && (
+                        <span className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full ml-2" title="Tamamlandı"></span>
+                      )}
+                      {group.status === 'failed' && (
+                        <span className="flex-shrink-0 w-2 h-2 bg-red-500 rounded-full ml-2" title="Başarısız"></span>
+                      )}
+                      {group.status === 'partial' && (
+                        <span className="flex-shrink-0 w-2 h-2 bg-orange-500 rounded-full ml-2" title="Kısmen Tamamlandı"></span>
+                      )}
+                      {group.status === 'scheduled' && (
+                        <span className="flex-shrink-0 w-2 h-2 bg-yellow-500 rounded-full ml-2" title="Planlanmış"></span>
+                      )}
+                    </div>
+                  </div>
+                  {group.totalTasks > 0 && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      {group.completedTasks}/{group.totalTasks} tamamlandı
+                      {group.failedTasks > 0 && `, ${group.failedTasks} başarısız`}
+                    </div>
+                  )}
+                  {group.isScheduled && !group.startTime && group.scheduleStartTime && (
+                    <div className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                      Planlanan: {group.scheduleStartTime.substring(0, 5)}
+                    </div>
+                  )}
+                  {group.startTime && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Başlangıç: {new Date(group.startTime).toLocaleTimeString('tr-TR')}
+                    </div>
+                  )}
+                  {group.groupExecutionId && (
+                    <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
+                      Exec ID: {group.groupExecutionId.substring(0, 8)}...
+                    </div>
+                  )}
+                  {group.endTime && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Bitiş: {new Date(group.endTime).toLocaleTimeString('tr-TR')}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
-        </div>
-        
-        {selectedFlow ? (
-          <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 flex flex-col overflow-hidden min-h-0">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              nodeTypes={memoizedNodeTypes}
-              fitView
-              fitViewOptions={{
-                padding: 20, // Padding artırıldı (taskları daha iyi görünür hale getirmek için)
-                minZoom: 1.2, // 2 birim daha yakınlaştırıldı (0.72 -> 1.2)
-                maxZoom: 2,
-              }}
-              minZoom={0.5}
-              maxZoom={3}
-              defaultViewport={{ x: 0, y: 0, zoom: 1.2 }} // 2 birim daha yakınlaştırıldı (1.0 -> 1.2)
-              className="bg-gray-50 dark:bg-gray-900"
-              style={{ width: '100%', height: '100%', minHeight: 0 }}
-            >
-              <Background />
-              <Controls />
-              <MiniMap 
-                nodeColor={(node) => {
-                  const status = node.data?.status;
-                  return getStatusColor(status);
+
+        {/* Sağ taraf: Seçilen grubun flow'u */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+              {selectedGroupId ? activeGroupsWithNames.find(g => g.id === selectedGroupId)?.name : 'Grup Seçin'}
+            </h3>
+            <div className="flex items-center gap-4">
+              {selectedGroupId && (
+                <button
+                  onClick={() => setShowStartModal(true)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                  disabled={isStarting}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {isStarting ? 'Başlatılıyor...' : 'Grup Başlat'}
+                </button>
+              )}
+              <div className="flex gap-2 text-xs flex-wrap">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Running') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Çalışıyor</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Ready') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Hazır</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Pending') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Beklemede</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('WaitingRetry') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Yeniden Deneme</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Completed') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Tamamlandı</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('MarkedAsSuccess') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Başarılı Sayıldı</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Failed') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Başarısız</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getStatusColor('Paused') }}></div>
+                  <span className="text-gray-600 dark:text-gray-400">Duraklatıldı</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {selectedFlow ? (
+            <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 flex flex-col overflow-hidden min-h-0">
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                nodeTypes={memoizedNodeTypes}
+                fitView
+                fitViewOptions={{
+                  padding: 10, // Padding artırıldı (taskları daha iyi görünür hale getirmek için)
+                  minZoom: 1.2, // 2 birim daha yakınlaştırıldı (0.72 -> 1.2)
+                  maxZoom: 2,
                 }}
-              />
-            </ReactFlow>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg shadow-md text-gray-500 dark:text-gray-400">
-            Lütfen sol taraftan bir grup seçin
-          </div>
-        )}
-      </div>
+                minZoom={0.5}
+                maxZoom={3}
+                defaultViewport={{ x: 0, y: 0, zoom: 1.2 }} // 2 birim daha yakınlaştırıldı (1.0 -> 1.2)
+                className="bg-gray-50 dark:bg-gray-900"
+                style={{ width: '100%', height: '100%', minHeight: 0 }}
+              >
+                <Background />
+                <Controls />
+                <MiniMap
+                  nodeColor={(node) => {
+                    const status = node.data?.status;
+                    return getStatusColor(status);
+                  }}
+                />
+              </ReactFlow>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg shadow-md text-gray-500 dark:text-gray-400">
+              Lütfen sol taraftan bir grup seçin
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Alt kısım: Kronolojik Execution Logları */}
@@ -1237,10 +1237,10 @@ export default function TaskDashboardView({
               disabled={loadingExecutionLogs}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded text-xs font-medium transition-colors flex items-center gap-1"
             >
-              <svg 
+              <svg
                 className={`w-4 h-4 ${loadingExecutionLogs ? 'animate-spin' : ''}`}
-                fill="none" 
-                stroke="currentColor" 
+                fill="none"
+                stroke="currentColor"
                 viewBox="0 0 24 24"
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1268,7 +1268,7 @@ export default function TaskDashboardView({
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
               Grup Başlatma Seçenekleri
             </h3>
-            
+
             <div className="space-y-4 mb-6">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -1284,7 +1284,7 @@ export default function TaskDashboardView({
                   <div className="text-sm text-gray-500 dark:text-gray-400">Tüm task'ları sıfırlayıp baştan başlatır</div>
                 </div>
               </label>
-              
+
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="radio"
@@ -1329,7 +1329,7 @@ export default function TaskDashboardView({
             </div>
 
             <div className="flex justify-end gap-3">
-                              <button 
+              <button
                 onClick={() => {
                   setShowStartModal(false);
                   setStartFromTaskId(null);
@@ -1338,7 +1338,7 @@ export default function TaskDashboardView({
                 disabled={isStarting}
               >
                 İptal
-                              </button>
+              </button>
               <ProtectedButton
                 permission="actions.group.start"
                 onClick={handleStartGroup}
@@ -1348,9 +1348,9 @@ export default function TaskDashboardView({
                 {isStarting ? 'Başlatılıyor...' : 'Başlat'}
               </ProtectedButton>
             </div>
-                        </div>
-                      </div>
-                    )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

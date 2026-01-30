@@ -2,6 +2,19 @@ import { useState, useEffect } from 'react';
 import type { TaskExecutionHistory, GroupExecutionHistory, FlowExecutionHistory, TaskItem, TaskGroup, FlowItem, User } from '../services/api';
 import { executionHistoryApi, taskItemsApi, taskGroupsApi, flowItemsApi, usersApi } from '../services/api';
 
+// Simple Icon Components
+const ChevronRight = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6"></polyline>
+  </svg>
+);
+
+const ChevronDown = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9"></polyline>
+  </svg>
+);
+
 export default function ExecutionHistoryPage() {
   const [activeTab, setActiveTab] = useState<'tasks' | 'groups' | 'flows'>('tasks');
   const [taskHistories, setTaskHistories] = useState<TaskExecutionHistory[]>([]);
@@ -20,6 +33,18 @@ export default function ExecutionHistoryPage() {
   const [selectedFlowId, setSelectedFlowId] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+
+  // Expansion States for Hierarchical View
+  const [expandedFlows, setExpandedFlows] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  // Nested Data States
+  const [nestedGroupHistories, setNestedGroupHistories] = useState<Record<string, GroupExecutionHistory[]>>({});
+  const [nestedTaskHistories, setNestedTaskHistories] = useState<Record<string, TaskExecutionHistory[]>>({});
+
+  // Loading states for nested data
+  const [loadingNestedGroups, setLoadingNestedGroups] = useState<Record<string, boolean>>({});
+  const [loadingNestedTasks, setLoadingNestedTasks] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadData();
@@ -111,6 +136,50 @@ export default function ExecutionHistoryPage() {
     }
   };
 
+  const toggleFlowExpansion = async (flowExecutionId: string) => {
+    const isExpanded = expandedFlows[flowExecutionId];
+
+    // Toggle expansion state
+    setExpandedFlows(prev => ({ ...prev, [flowExecutionId]: !isExpanded }));
+
+    // If expanding and data not loaded, load it
+    if (!isExpanded && !nestedGroupHistories[flowExecutionId]) {
+      try {
+        setLoadingNestedGroups(prev => ({ ...prev, [flowExecutionId]: true }));
+        const data = await executionHistoryApi.getGroupHistories({
+          flowItemExecutionId: flowExecutionId
+        });
+        setNestedGroupHistories(prev => ({ ...prev, [flowExecutionId]: data }));
+      } catch (err) {
+        console.error('Failed to load nested group histories', err);
+      } finally {
+        setLoadingNestedGroups(prev => ({ ...prev, [flowExecutionId]: false }));
+      }
+    }
+  };
+
+  const toggleGroupExpansion = async (groupExecutionId: string) => {
+    const isExpanded = expandedGroups[groupExecutionId];
+
+    // Toggle expansion state
+    setExpandedGroups(prev => ({ ...prev, [groupExecutionId]: !isExpanded }));
+
+    // If expanding and data not loaded, load it
+    if (!isExpanded && !nestedTaskHistories[groupExecutionId]) {
+      try {
+        setLoadingNestedTasks(prev => ({ ...prev, [groupExecutionId]: true }));
+        const data = await executionHistoryApi.getTaskHistories({
+          groupExecutionId: groupExecutionId
+        });
+        setNestedTaskHistories(prev => ({ ...prev, [groupExecutionId]: data }));
+      } catch (err) {
+        console.error('Failed to load nested task histories', err);
+      } finally {
+        setLoadingNestedTasks(prev => ({ ...prev, [groupExecutionId]: false }));
+      }
+    }
+  };
+
   const formatDuration = (duration?: string) => {
     if (!duration) return '-';
     try {
@@ -165,6 +234,218 @@ export default function ExecutionHistoryPage() {
       default: return '#6c757d';
     }
   };
+
+  // Helper to render Task Table (reused for main tab and nested view)
+  const renderTaskTable = (histories: TaskExecutionHistory[], isNested = false) => (
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto ${isNested ? 'ml-8 mt-2 border-l-4 border-blue-400 dark:border-blue-600' : ''}`}>
+      <table className="w-full border-collapse">
+        <thead className={`bg-gray-100 dark:bg-gray-700 ${isNested ? 'bg-blue-50 dark:bg-gray-800' : ''}`}>
+          <tr>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Task</th>
+            {!isNested && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Grup</th>}
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Süre</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Durum</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Hata Sayısı</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Son Hata</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Retry Başlangıç</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">İlerleme</th>
+            {!isNested && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tetikleyen</th>}
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Parametreler</th>
+          </tr>
+        </thead>
+        <tbody>
+          {histories.length === 0 ? (
+            <tr>
+              <td colSpan={12} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                {isNested && loadingNestedTasks ? 'Yükleniyor...' : (loading ? 'Yükleniyor...' : 'Kayıt bulunamadı')}
+              </td>
+            </tr>
+          ) : (
+            histories.map(history => (
+              <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getTaskName(history.taskItemId)}</td>
+                {!isNested && <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.groupId ? getGroupName(history.groupId) : '-'}</td>}
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.duration)}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className="px-2 py-1 rounded-full text-xs font-medium text-white"
+                    style={{ backgroundColor: getStatusColor(history.finalStatus) }}
+                  >
+                    {history.finalStatus}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.errorCount}</td>
+                <td className="px-4 py-3 text-sm">
+                  {history.errorMessage ? (
+                    <span title={history.errorMessage} className="text-red-600 dark:text-red-400">
+                      {history.errorMessage.length > 50
+                        ? history.errorMessage.substring(0, 50) + '...'
+                        : history.errorMessage}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500 dark:text-gray-400">-</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.retryStartTime)}</td>
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.progress}%</td>
+                {!isNested && <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                  {history.triggeredBy === 'System' ? (
+                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
+                      Sistem
+                    </span>
+                  ) : history.triggeredBy ? (
+                    (() => {
+                      const userName = getUserName(history.triggeredBy);
+                      return userName ? (
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
+                          {userName}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
+                          -
+                        </span>
+                      );
+                    })()
+                  ) : (
+                    <span className="text-gray-500 dark:text-gray-400">-</span>
+                  )}
+                </td>}
+                <td className="px-4 py-3 text-sm">
+                  {history.taskParameterValues && Object.keys(history.taskParameterValues).length > 0 ? (
+                    <div className="space-y-1">
+                      {Object.entries(history.taskParameterValues).map(([key, value]) => (
+                        <div key={key} className="text-xs">
+                          <span className="font-medium text-gray-700 dark:text-gray-300">{key}:</span>{' '}
+                          <span className="text-gray-600 dark:text-gray-400">
+                            {value === null ? (
+                              <span className="italic text-gray-500 dark:text-gray-500">NULL</span>
+                            ) : value.length > 30 ? (
+                              <span title={value}>{value.substring(0, 30)}...</span>
+                            ) : (
+                              value
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-gray-500 dark:text-gray-400">-</span>
+                  )}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  // Helper to render Group Table (reused for main tab and nested view)
+  const renderGroupTable = (histories: GroupExecutionHistory[], isNested = false) => (
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto ${isNested ? 'ml-8 mt-2 border-l-4 border-indigo-400 dark:border-indigo-600' : ''}`}>
+      <table className="w-full border-collapse">
+        <thead className={`bg-gray-100 dark:bg-gray-700 ${isNested ? 'bg-indigo-50 dark:bg-gray-800' : ''}`}>
+          <tr>
+            {isNested && <th className="px-4 py-3 w-8"></th>}
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Grup</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Süre</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Durum</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Toplam Task</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tamamlanan</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başarısız</th>
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Toplam Hata</th>
+            {!isNested && <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tetikleyen</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {histories.length === 0 ? (
+            <tr>
+              <td colSpan={isNested ? 10 : 9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                {isNested && loadingNestedGroups ? 'Yükleniyor...' : (loading ? 'Yükleniyor...' : 'Kayıt bulunamadı')}
+              </td>
+            </tr>
+          ) : (
+            histories.map(history => (
+              <>
+                <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                  {isNested && (
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => toggleGroupExpansion(history.id)}
+                        className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                      >
+                        {expandedGroups[history.id] ? <ChevronDown /> : <ChevronRight />}
+                      </button>
+                    </td>
+                  )}
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getGroupName(history.groupId)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.duration)}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="px-2 py-1 rounded-full text-xs font-medium text-white"
+                      style={{ backgroundColor: getStatusColor(history.status || 'Pending') }}
+                    >
+                      {history.status || 'Pending'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.totalTasks}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-green-600 dark:text-green-400">
+                    {history.completedTasks}
+                  </td>
+                  <td className="px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">
+                    {history.failedTasks}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.totalErrors}</td>
+                  {!isNested && <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                    {history.triggeredBy === 'System' ? (
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
+                        Sistem
+                      </span>
+                    ) : history.triggeredBy ? (
+                      (() => {
+                        const userName = getUserName(history.triggeredBy);
+                        return userName ? (
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
+                            {userName}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
+                            -
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-gray-500 dark:text-gray-400">-</span>
+                    )}
+                  </td>}
+                </tr>
+                {/* Nested Tasks Row */}
+                {isNested && expandedGroups[history.id] && (
+                  <tr>
+                    <td colSpan={10} className="px-4 py-4 bg-gray-50 dark:bg-gray-900/50">
+                      {loadingNestedTasks[history.id] ? (
+                        <div className="text-center py-2 text-gray-500">Task verileri yükleniyor...</div>
+                      ) : (
+                        nestedTaskHistories[history.id] && renderTaskTable(nestedTaskHistories[history.id], true)
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div className="py-4">
@@ -264,7 +545,7 @@ export default function ExecutionHistoryPage() {
         </div>
         <button
           className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-          onClick={activeTab === 'tasks' ? loadTaskHistories : loadGroupHistories}
+          onClick={activeTab === 'tasks' ? loadTaskHistories : activeTab === 'groups' ? loadGroupHistories : loadFlowHistories}
         >
           Filtrele
         </button>
@@ -274,186 +555,16 @@ export default function ExecutionHistoryPage() {
 
       {loading && <div className="flex justify-center items-center py-8 text-gray-600 dark:text-gray-400">Yükleniyor...</div>}
 
-      {activeTab === 'tasks' && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead className="bg-gray-100 dark:bg-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Task</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Grup</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Süre</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Durum</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Hata Sayısı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Son Hata</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Retry Başlangıç</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">İlerleme</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tetikleyen</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Parametreler</th>
-              </tr>
-            </thead>
-            <tbody>
-              {taskHistories.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
-                    {loading ? 'Yükleniyor...' : 'Kayıt bulunamadı'}
-                  </td>
-                </tr>
-              ) : (
-                taskHistories.map(history => (
-                  <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getTaskName(history.taskItemId)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.groupId ? getGroupName(history.groupId) : '-'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.duration)}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="px-2 py-1 rounded-full text-xs font-medium text-white"
-                        style={{ backgroundColor: getStatusColor(history.finalStatus) }}
-                      >
-                        {history.finalStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.errorCount}</td>
-                    <td className="px-4 py-3 text-sm">
-                      {history.errorMessage ? (
-                        <span title={history.errorMessage} className="text-red-600 dark:text-red-400">
-                          {history.errorMessage.length > 50
-                            ? history.errorMessage.substring(0, 50) + '...'
-                            : history.errorMessage}
-                        </span>
-                      ) : (
-                        <span className="text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.retryStartTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.progress}%</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                      {history.triggeredBy === 'System' ? (
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
-                          Sistem
-                        </span>
-                      ) : history.triggeredBy ? (
-                        (() => {
-                          const userName = getUserName(history.triggeredBy);
-                          return userName ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
-                              {userName}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
-                              -
-                            </span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {history.taskParameterValues && Object.keys(history.taskParameterValues).length > 0 ? (
-                        <div className="space-y-1">
-                          {Object.entries(history.taskParameterValues).map(([key, value]) => (
-                            <div key={key} className="text-xs">
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{key}:</span>{' '}
-                              <span className="text-gray-600 dark:text-gray-400">
-                                {value === null ? (
-                                  <span className="italic text-gray-500 dark:text-gray-500">NULL</span>
-                                ) : value.length > 30 ? (
-                                  <span title={value}>{value.substring(0, 30)}...</span>
-                                ) : (
-                                  value
-                                )}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {activeTab === 'tasks' && renderTaskTable(taskHistories)}
 
-      {activeTab === 'groups' && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead className="bg-gray-100 dark:bg-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Grup</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Süre</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Toplam Task</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tamamlanan</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başarısız</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Toplam Hata</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Tetikleyen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groupHistories.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
-                    {loading ? 'Yükleniyor...' : 'Kayıt bulunamadı'}
-                  </td>
-                </tr>
-              ) : (
-                groupHistories.map(history => (
-                  <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getGroupName(history.groupId)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.duration)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.totalTasks}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-green-600 dark:text-green-400">
-                      {history.completedTasks}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400">
-                      {history.failedTasks}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.totalErrors}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                      {history.triggeredBy === 'System' ? (
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
-                          Sistem
-                        </span>
-                      ) : history.triggeredBy ? (
-                        (() => {
-                          const userName = getUserName(history.triggeredBy);
-                          return userName ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
-                              {userName}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
-                              -
-                            </span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {activeTab === 'groups' && renderGroupTable(groupHistories)}
+
       {activeTab === 'flows' && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto">
           <table className="w-full border-collapse">
             <thead className="bg-gray-100 dark:bg-gray-700">
               <tr>
+                <th className="px-4 py-3 w-8"></th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Akış</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Başlangıç Zamanı</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 dark:text-white border-b-2 border-gray-300 dark:border-gray-600">Bitiş Zamanı</th>
@@ -466,49 +577,71 @@ export default function ExecutionHistoryPage() {
             <tbody>
               {flowHistories.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                     {loading ? 'Yükleniyor...' : 'Kayıt bulunamadı'}
                   </td>
                 </tr>
               ) : (
                 flowHistories.map(history => (
-                  <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getFlowName(history.flowItemId)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.endTime ? (new Date(history.endTime).getTime() - new Date(history.startTime).getTime()).toString() : undefined)}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="px-2 py-1 rounded-full text-xs font-medium text-white"
-                        style={{ backgroundColor: getStatusColor(history.status) }}
-                      >
-                        {history.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.errorCount}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                      {history.triggeredBy === 'System' ? (
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
-                          Sistem
+                  <>
+                    <tr key={history.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => toggleFlowExpansion(history.id)}
+                          className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                        >
+                          {expandedFlows[history.id] ? <ChevronDown /> : <ChevronRight />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{getFlowName(history.flowItemId)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.startTime)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDateTime(history.endTime)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatDuration(history.endTime ? (new Date(history.endTime).getTime() - new Date(history.startTime).getTime()).toString() : undefined)}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="px-2 py-1 rounded-full text-xs font-medium text-white"
+                          style={{ backgroundColor: getStatusColor(history.status) }}
+                        >
+                          {history.status}
                         </span>
-                      ) : history.triggeredBy ? (
-                        (() => {
-                          const userName = getUserName(history.triggeredBy);
-                          return userName ? (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
-                              {userName}
-                            </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{history.errorCount}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                        {history.triggeredBy === 'System' ? (
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300">
+                            Sistem
+                          </span>
+                        ) : history.triggeredBy ? (
+                          (() => {
+                            const userName = getUserName(history.triggeredBy);
+                            return userName ? (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300" title={`Kullanıcı ID: ${history.triggeredBy}`}>
+                                {userName}
+                              </span>
+                            ) : (
+                              <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
+                                -
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                    {/* Nested Groups Row */}
+                    {expandedFlows[history.id] && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-4 bg-gray-50 dark:bg-gray-900/50">
+                          {loadingNestedGroups[history.id] ? (
+                            <div className="text-center py-2 text-gray-500">Grup verileri yükleniyor...</div>
                           ) : (
-                            <span className="text-gray-500 dark:text-gray-400" title={`Kullanıcı bulunamadı (ID: ${history.triggeredBy})`}>
-                              -
-                            </span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
+                            nestedGroupHistories[history.id] && renderGroupTable(nestedGroupHistories[history.id], true)
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))
               )}
             </tbody>
@@ -518,4 +651,3 @@ export default function ExecutionHistoryPage() {
     </div>
   );
 }
-

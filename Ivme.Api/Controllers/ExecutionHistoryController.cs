@@ -21,20 +21,23 @@ public class ExecutionHistoryController : ControllerBase
     public async Task<ActionResult<List<TaskExecutionHistory>>> GetTaskExecutionHistories(
         [FromQuery] string? taskItemId = null,
         [FromQuery] string? groupId = null,
+        [FromQuery] string? groupExecutionId = null,
+        [FromQuery] string? flowItemExecutionId = null,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null)
     {
-        var histories = await _executionHistoryService.GetTaskExecutionHistoriesAsync(taskItemId, groupId, startDate, endDate);
+        var histories = await _executionHistoryService.GetTaskExecutionHistoriesAsync(taskItemId, groupId, groupExecutionId, flowItemExecutionId, startDate, endDate);
         return Ok(histories);
     }
 
     [HttpGet("groups")]
     public async Task<ActionResult<List<GroupExecutionHistory>>> GetGroupExecutionHistories(
         [FromQuery] string? groupId = null,
+        [FromQuery] string? flowItemExecutionId = null,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null)
     {
-        var histories = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId, startDate, endDate);
+        var histories = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId, flowItemExecutionId, startDate, endDate);
         return Ok(histories);
     }
 
@@ -81,19 +84,25 @@ public class ExecutionHistoryController : ControllerBase
         return Ok(history);
     }
 
-    [HttpGet("today-statuses")]
-    public async Task<ActionResult<Dictionary<string, string>>> GetTodayTaskStatuses()
+    public class ExecutionStatusQuery
     {
-        var statuses = await _executionHistoryService.GetTodayTaskStatusesByGroupAsync();
+        public string? FlowItemExecutionId { get; set; }
+        public string? GroupExecutionId { get; set; }
+    }
+
+    [HttpGet("today-statuses")]
+    public async Task<ActionResult<Dictionary<string, string>>> GetTodayTaskStatuses([FromQuery] ExecutionStatusQuery query)
+    {
+        var statuses = await _executionHistoryService.GetTodayTaskStatusesByGroupAsync(groupExecutionId: query.GroupExecutionId, flowItemExecutionId: query.FlowItemExecutionId);
         // Dictionary<string, TaskItemStatus> -> Dictionary<string, string> dönüşümü
         var result = statuses.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString());
         return Ok(result);
     }
 
     [HttpGet("today-statuses-with-errors")]
-    public async Task<ActionResult<Dictionary<string, object>>> GetTodayTaskStatusesWithErrors()
+    public async Task<ActionResult<Dictionary<string, object>>> GetTodayTaskStatusesWithErrors([FromQuery] ExecutionStatusQuery query)
     {
-        var statusesWithErrors = await _executionHistoryService.GetTodayTaskStatusesWithErrorsByGroupAsync();
+        var statusesWithErrors = await _executionHistoryService.GetTodayTaskStatusesWithErrorsByGroupAsync(groupExecutionId: query.GroupExecutionId, flowItemExecutionId: query.FlowItemExecutionId);
         // Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)> -> Dictionary<string, object> dönüşümü
         var result = statusesWithErrors.ToDictionary(
             kvp => kvp.Key, 

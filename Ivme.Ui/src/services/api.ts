@@ -128,6 +128,7 @@ export type GroupExecutionHistory = {
   triggeredBy?: string;
   flowItemId?: string;
   flowItemExecutionId?: string;
+  status?: string;
   createdAt: string;
 };
 
@@ -496,23 +497,29 @@ export const executionHistoryApi = {
   getTaskHistories: (params?: {
     taskItemId?: string;
     groupId?: string;
+    groupExecutionId?: string;
+    flowItemExecutionId?: string;
     startDate?: string;
     endDate?: string;
   }) => {
     const queryParams = new URLSearchParams();
     if (params?.taskItemId) queryParams.append('taskItemId', params.taskItemId);
     if (params?.groupId) queryParams.append('groupId', params.groupId);
+    if (params?.groupExecutionId) queryParams.append('groupExecutionId', params.groupExecutionId);
+    if (params?.flowItemExecutionId) queryParams.append('flowItemExecutionId', params.flowItemExecutionId);
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
     return fetchApi<TaskExecutionHistory[]>(`/executionhistory/tasks?${queryParams.toString()}`);
   },
   getGroupHistories: (params?: {
     groupId?: string;
+    flowItemExecutionId?: string;
     startDate?: string;
     endDate?: string;
   }) => {
     const queryParams = new URLSearchParams();
     if (params?.groupId) queryParams.append('groupId', params.groupId);
+    if (params?.flowItemExecutionId) queryParams.append('flowItemExecutionId', params.flowItemExecutionId);
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
     return fetchApi<GroupExecutionHistory[]>(`/executionhistory/groups?${queryParams.toString()}`);
@@ -534,15 +541,25 @@ export const executionHistoryApi = {
   },
   getFlowHistory: (id: string) =>
     fetchApi<FlowExecutionHistory>(`/executionhistory/flows/${id}`),
-  getTodayStatuses: () =>
-    fetchApi<Record<string, string>>('/executionhistory/today-statuses'),
-  getTodayStatusesWithErrors: () =>
-    fetchApi<Record<string, { status: string; errorMessage?: string }>>('/executionhistory/today-statuses-with-errors'),
+  getTodayStatuses: (params?: { flowItemExecutionId?: string; groupExecutionId?: string }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.flowItemExecutionId) queryParams.append('flowItemExecutionId', params.flowItemExecutionId);
+    if (params?.groupExecutionId) queryParams.append('groupExecutionId', params.groupExecutionId);
+    const queryString = queryParams.toString();
+    return fetchApi<Record<string, string>>(`/executionhistory/today-statuses${queryString ? `?${queryString}` : ''}`);
+  },
+  getTodayStatusesWithErrors: (params?: { flowItemExecutionId?: string; groupExecutionId?: string }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.flowItemExecutionId) queryParams.append('flowItemExecutionId', params.flowItemExecutionId);
+    if (params?.groupExecutionId) queryParams.append('groupExecutionId', params.groupExecutionId);
+    const queryString = queryParams.toString();
+    return fetchApi<Record<string, { status: string; errorMessage?: string }>>(`/executionhistory/today-statuses-with-errors${queryString ? `?${queryString}` : ''}`);
+  },
   getTodayFlowStatuses: () =>
     fetchApi<Record<string, string>>('/executionhistory/today-flow-statuses'),
   getDashboardMetrics: async () => {
     const raw = await fetchApi<any>('/executionhistory/metrics');
-    if (!raw) return undefined as DashboardMetrics;
+    if (!raw) return undefined as unknown as DashboardMetrics;
 
     const mapItem = (it: any): FailedMetricItem => ({
       Id: it.id ?? it.Id,

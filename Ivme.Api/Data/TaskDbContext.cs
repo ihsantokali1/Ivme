@@ -184,6 +184,7 @@ public class TaskDbContext : DbContext
             entity.Property(e => e.TriggeredBy).HasMaxLength(200).IsRequired(false);
             entity.Property(e => e.FlowItemId).HasMaxLength(50);
             entity.Property(e => e.FlowItemExecutionId).HasMaxLength(50);
+            entity.Property(e => e.Status).HasConversion<string>().HasMaxLength(20);
             entity.HasIndex(e => e.GroupId);
             entity.HasIndex(e => e.FlowItemId);
             entity.HasIndex(e => e.FlowItemExecutionId);

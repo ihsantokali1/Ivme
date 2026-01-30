@@ -635,6 +635,16 @@ async Task EnsureFlowTablesAsync(TaskDbContext dbContext)
                     CREATE INDEX [IX_GroupExecutionHistories_FlowItemExecutionId] ON [GroupExecutionHistories]([FlowItemExecutionId]);
             END";
         await command.ExecuteNonQueryAsync();
+        command.CommandText = @"
+            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND type in (N'U'))
+            BEGIN
+                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[GroupExecutionHistories]') AND name = 'Status')
+                 BEGIN
+                    ALTER TABLE [dbo].[GroupExecutionHistories] ADD [Status] NVARCHAR(20) NOT NULL DEFAULT 'Running';
+                    PRINT '[DB] Added Status to GroupExecutionHistories';
+                 END
+            END";
+        await command.ExecuteNonQueryAsync();
         
         Console.WriteLine("[DB] ✓ Flow tables verified/created");
     }
@@ -846,7 +856,7 @@ async Task EnsureDefaultRolesAsync(TaskDbContext dbContext)
 // Periyodik olarak stored procedure'leri senkronize et (her 5 dakikada bir)
 var spSyncTimer = new System.Timers.Timer(TimeSpan.FromMinutes(5).TotalMilliseconds)
 {
-    AutoReset = true,
+    AutoReset = false, // Üst üste binmeyi önlemek için false yapıyoruz
     Enabled = dbConfig.UseDatabase // Sadece database modunda aktif
 };
 
@@ -861,6 +871,13 @@ spSyncTimer.Elapsed += async (sender, e) =>
     catch (Exception ex)
     {
         Console.WriteLine($"[SP Sync Timer] Error: {ex.Message}");
+    }
+    finally
+    {
+        if (spSyncTimer.Enabled)
+        {
+            spSyncTimer.Start();
+        }
     }
 };
 
@@ -885,9 +902,9 @@ if (dbConfig.UseDatabase)
 }
 
 // Periyodik olarak task item durumlarını kontrol et
-var timer = new System.Timers.Timer(TimeSpan.FromMinutes(1).TotalMilliseconds)
+var timer = new System.Timers.Timer(TimeSpan.FromSeconds(5).TotalMilliseconds)
 {
-    AutoReset = true,
+    AutoReset = false, // Üst üste binmeyi önlemek için false yapıyoruz
     Enabled = true
 };
 
@@ -909,6 +926,14 @@ timer.Elapsed += async (sender, e) =>
         // Hataları logla ama uygulamayı durdurma
         Console.WriteLine($"[Timer] ERROR: Task item status check error: {ex.Message}");
         Console.WriteLine($"[Timer] Stack trace: {ex.StackTrace}");
+    }
+    finally
+    {
+        // İşlem bittiğinde timer'ı tekrar başlat
+        if (timer.Enabled)
+        {
+            timer.Start();
+        }
     }
 };
 

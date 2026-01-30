@@ -5,8 +5,8 @@ namespace Ivme.Api.Services;
 public interface ITaskManagementService
 {
     Task<bool> CanStartTaskItemAsync(string taskItemId, string? groupId = null);
-    Task<(bool canStart, string? reason)> CanStartTaskItemWithReasonAsync(string taskItemId, string? groupId = null);
-    Task<bool> StartTaskItemAsync(string taskItemId, string? groupId = null, bool skipCanStartCheck = false, string? triggeredBy = null, string? flowItemId = null, string? flowItemExecutionId = null);
+    Task<(bool canStart, string? reason)> CanStartTaskItemWithReasonAsync(string taskItemId, string? groupId = null, string? flowExecutionId = null, string? groupExecutionId = null);
+    Task<bool> StartTaskItemAsync(string taskItemId, string? groupId = null, bool skipCanStartCheck = false, string? triggeredBy = null, string? flowItemId = null, string? flowItemExecutionId = null, string? groupExecutionId = null);
     Task<bool> PauseTaskItemAsync(string taskItemId, string? groupId = null);
     Task<bool> ResumeTaskItemAsync(string taskItemId, string? groupId = null);
     Task<bool> StopTaskItemAsync(string taskItemId, string? groupId = null);

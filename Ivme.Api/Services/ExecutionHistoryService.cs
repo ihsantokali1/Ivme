@@ -1,6 +1,8 @@
 ﻿using Ivme.Api.Data;
 using Ivme.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using static System.Reflection.Metadata.BlobBuilder;
 
 namespace Ivme.Api.Services;
@@ -10,9 +12,9 @@ public class ExecutionHistoryService : IExecutionHistoryService
     private readonly TaskDbContext? _dbContext;
     private readonly DatabaseConfig _dbConfig;
     private readonly ITaskDataService? _dataService;
-    private readonly Dictionary<string, TaskExecutionHistory> _activeTaskExecutions = new(); // TaskItemId -> ExecutionHistory
-    private readonly Dictionary<string, GroupExecutionHistory> _activeGroupExecutions = new(); // GroupId -> ExecutionHistory
-    private readonly Dictionary<string, FlowExecutionHistory> _activeFlowExecutions = new(); // FlowItemId -> ExecutionHistory
+    private static readonly ConcurrentDictionary<string, TaskExecutionHistory> _activeTaskExecutions = new(); // Id -> ExecutionHistory
+    private static readonly ConcurrentDictionary<string, GroupExecutionHistory> _activeGroupExecutions = new(); // Id -> ExecutionHistory
+    private static readonly ConcurrentDictionary<string, FlowExecutionHistory> _activeFlowExecutions = new(); // Id -> ExecutionHistory
 
     public ExecutionHistoryService(DatabaseConfig dbConfig, TaskDbContext? dbContext = null, ITaskDataService? dataService = null)
     {
@@ -51,7 +53,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 TaskParameterValues = taskParameterValues ?? new Dictionary<string, string?>(),
                 TriggeredBy = triggeredBy
             };
-            _activeTaskExecutions[taskItemId] = history;
+            _activeTaskExecutions[history.Id] = history;
             return history;
         }
 
@@ -70,7 +72,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
             if (existingRunningExecution != null)
             {
                 Console.WriteLine($"[StartTaskExecutionAsync] Task {taskItemId} in group {groupId} already has a Running execution {existingRunningExecution.Id}, skipping duplicate start");
-                _activeTaskExecutions[taskItemId] = existingRunningExecution;
+                _activeTaskExecutions[existingRunningExecution.Id] = existingRunningExecution;
                 return existingRunningExecution;
             }
             
@@ -124,7 +126,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 
                 await dbContext.SaveChangesAsync();
                 
-                _activeTaskExecutions[taskItemId] = existingPendingExecution;
+                _activeTaskExecutions[existingPendingExecution.Id] = existingPendingExecution;
                 return existingPendingExecution;
             }
         }
@@ -172,7 +174,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
         dbContext.TaskExecutionHistories.Add(execution);
         await dbContext.SaveChangesAsync();
         
-        _activeTaskExecutions[taskItemId] = execution;
+        _activeTaskExecutions[execution.Id] = execution;
         return execution;
     }
 
@@ -188,7 +190,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 execution.EndTime = DateTime.Now;
                 execution.FinalStatus = finalStatus;
                 execution.Progress = progress;
-                _activeTaskExecutions.Remove(execution.TaskItemId);
+                _activeTaskExecutions.TryRemove(execution.Id, out _);
             }
             return;
         }
@@ -215,9 +217,9 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 throw;
             }
             
-            if (_activeTaskExecutions.ContainsKey(executionDb.TaskItemId))
+            if (_activeTaskExecutions.ContainsKey(executionDb.Id))
             {
-                _activeTaskExecutions.Remove(executionDb.TaskItemId);
+                _activeTaskExecutions.TryRemove(executionDb.Id, out _);
             }
         }
         else
@@ -241,7 +243,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 execution.ErrorMessage = errorMessage;
                 execution.LastErrorTime = DateTime.Now;
                 execution.ErrorCount++;
-                _activeTaskExecutions.Remove(execution.TaskItemId);
+                _activeTaskExecutions.TryRemove(execution.Id, out _);
             }
             return;
         }
@@ -256,9 +258,9 @@ public class ExecutionHistoryService : IExecutionHistoryService
             executionDb.ErrorCount++;
             await dbContext.SaveChangesAsync();
             
-            if (_activeTaskExecutions.ContainsKey(executionDb.TaskItemId))
+            if (_activeTaskExecutions.ContainsKey(executionDb.Id))
             {
-                _activeTaskExecutions.Remove(executionDb.TaskItemId);
+                _activeTaskExecutions.TryRemove(executionDb.Id, out _);
             }
         }
     }
@@ -373,7 +375,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
         dbContext.GroupExecutionHistories.Add(execution);
         await dbContext.SaveChangesAsync();
         
-        _activeGroupExecutions[groupId] = execution;
+        _activeGroupExecutions[execution.Id] = execution;
         return execution;
     }
 
@@ -407,7 +409,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
         dbContext.FlowExecutionHistories.Add(execution);
         await dbContext.SaveChangesAsync();
         
-        _activeFlowExecutions[flowItemId] = execution;
+        _activeFlowExecutions[execution.Id] = execution;
         return execution;
     }
 
@@ -422,7 +424,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
             {
                 execution.EndTime = DateTime.Now;
                 execution.Status = status;
-                _activeFlowExecutions.Remove(execution.FlowItemId);
+                _activeFlowExecutions.TryRemove(execution.Id, out _);
             }
             return;
         }
@@ -434,18 +436,81 @@ public class ExecutionHistoryService : IExecutionHistoryService
             executionDb.Status = status;
             await dbContext.SaveChangesAsync();
             
-            if (_activeFlowExecutions.ContainsKey(executionDb.FlowItemId))
+            _activeFlowExecutions.TryRemove(executionDb.Id, out _);
+        }
+        
+    }
+
+    public async Task TerminateActiveExecutionsAsync(string flowItemId, string reason)
+    {
+        var dbContext = GetDbContext();
+        var now = DateTime.Now;
+
+        // 1. Memory'deki aktif flow execution'ları bul ve sonlandır
+        var activeFlows = _activeFlowExecutions.Values
+            .Where(e => e.FlowItemId == flowItemId)
+            .ToList();
+
+        foreach (var flow in activeFlows)
+        {
+            flow.EndTime = now;
+            flow.Status = $"Terminated: {reason}";
+            _activeFlowExecutions.TryRemove(flow.Id, out _);
+        }
+
+        // 2. DB'deki aktif flow execution'ları bul ve sonlandır
+        if (dbContext != null)
+        {
+            var dbFlows = await dbContext.FlowExecutionHistories
+                .Where(e => e.FlowItemId == flowItemId && e.EndTime == null)
+                .ToListAsync();
+
+            foreach (var flow in dbFlows)
             {
-                _activeFlowExecutions.Remove(executionDb.FlowItemId);
+                flow.EndTime = now;
+                flow.Status = $"Terminated: {reason}";
             }
+
+            // 3. Bu akışlara bağlı grup ve task'ları da bulup sonlandır
+            var flowExecutionIds = activeFlows.Select(f => f.Id).Concat(dbFlows.Select(f => f.Id)).Distinct().ToList();
+            if (flowExecutionIds.Any())
+            {
+                // Gruplar
+                var activeGroups = await dbContext.GroupExecutionHistories
+                    .Where(e => flowExecutionIds.Contains(e.FlowItemExecutionId) && e.EndTime == null)
+                    .ToListAsync();
+                
+                foreach (var group in activeGroups)
+                {
+                    group.EndTime = now;
+                    group.Status = TaskItemStatus.Failed;
+                    _activeGroupExecutions.TryRemove(group.Id, out _);
+                }
+
+                // Tasklar
+                var activeTasks = await dbContext.TaskExecutionHistories
+                    .Where(e => flowExecutionIds.Contains(e.FlowItemExecutionId) && e.EndTime == null)
+                    .ToListAsync();
+
+                foreach (var task in activeTasks)
+                {
+                    task.EndTime = now;
+                    task.FinalStatus = TaskItemStatus.Failed;
+                    task.ErrorMessage = $"Terminated due to flow restart: {reason}";
+                    _activeTaskExecutions.TryRemove(task.Id, out _);
+                }
+            }
+
+            await dbContext.SaveChangesAsync();
         }
     }
 
     public async Task<FlowExecutionHistory?> GetActiveFlowExecutionAsync(string flowItemId)
     {
-        if (_activeFlowExecutions.TryGetValue(flowItemId, out var execution))
+        var activeHistory = _activeFlowExecutions.Values.FirstOrDefault(e => e.FlowItemId == flowItemId);
+        if (activeHistory != null)
         {
-            return execution;
+            return activeHistory;
         }
 
         var dbContext = GetDbContext();
@@ -505,98 +570,110 @@ public class ExecutionHistoryService : IExecutionHistoryService
         return await query.OrderByDescending(e => e.StartTime).ToListAsync();
     }
 
-    public async Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors)
+    public async Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, TaskItemStatus? status = null, bool isFinished = true)
     {
-        // ÖNEMLİ: EndTime sadece tüm task'lar tamamlandığında set edilir
-        // Güvenlik kontrolü: Eğer tüm task'lar tamamlanmamışsa EndTime set etme
-        if (totalTasks > 0 && (completedTasks + failedTasks) != totalTasks)
-        {
-            // Tüm task'lar tamamlanmamış, sadece sayıları güncelle ama EndTime set etme
-            var dbContext = GetDbContext();
-            if (dbContext == null)
-            {
-                // JSON modunda
-                var execution = _activeGroupExecutions.Values.FirstOrDefault(e => e.Id == executionId);
-                if (execution != null)
-                {
-                    execution.TotalTasks = totalTasks;
-                    execution.CompletedTasks = completedTasks;
-                    execution.FailedTasks = failedTasks;
-                    execution.TotalErrors = totalErrors;
-                    // EndTime set etme - tüm task'lar tamamlanmadı
-                }
-            }
-            else
-            {
-                var executionDb = await dbContext.GroupExecutionHistories.FirstOrDefaultAsync(e => e.Id == executionId);
-                if (executionDb != null)
-                {
-                    executionDb.TotalTasks = totalTasks;
-                    executionDb.CompletedTasks = completedTasks;
-                    executionDb.FailedTasks = failedTasks;
-                    executionDb.TotalErrors = totalErrors;
-                    // EndTime set etme - tüm task'lar tamamlanmadı
-                    await dbContext.SaveChangesAsync();
-                }
-            }
-            return;
-        }
+        // ÖNEMLİ: Eğer isFinished false ise veya tüm tasklar bitmemişse EndTime set edilmez
+        bool shouldActuallyComplete = isFinished;
         
-        // Tüm task'lar tamamlandı, EndTime'ı set et
-        var dbContextForComplete = GetDbContext();
-        if (dbContextForComplete == null)
+        var dbContext = GetDbContext();
+        if (dbContext == null)
         {
             // JSON modunda
             var execution = _activeGroupExecutions.Values.FirstOrDefault(e => e.Id == executionId);
             if (execution != null)
             {
-                execution.EndTime = DateTime.Now;
                 execution.TotalTasks = totalTasks;
                 execution.CompletedTasks = completedTasks;
                 execution.FailedTasks = failedTasks;
                 execution.TotalErrors = totalErrors;
-                _activeGroupExecutions.Remove(execution.GroupId);
+                
+                if (shouldActuallyComplete)
+                {
+                    execution.EndTime = DateTime.Now;
+                    execution.Status = status ?? (failedTasks > 0 ? TaskItemStatus.Failed : TaskItemStatus.Completed);
+                    _activeGroupExecutions.TryRemove(execution.Id, out _);
+                }
+                else
+                {
+                    // Ara güncelleme: Statü belirtilmemişse 'Running' olarak tut
+                    execution.Status = status ?? TaskItemStatus.Running;
+                }
             }
             return;
         }
 
-        var executionDbComplete = await dbContextForComplete.GroupExecutionHistories.FirstOrDefaultAsync(e => e.Id == executionId);
-        if (executionDbComplete != null)
+        var executionDb = await dbContext.GroupExecutionHistories.FirstOrDefaultAsync(e => e.Id == executionId);
+        if (executionDb != null)
         {
-            executionDbComplete.EndTime = DateTime.Now;
-            executionDbComplete.TotalTasks = totalTasks;
-            executionDbComplete.CompletedTasks = completedTasks;
-            executionDbComplete.FailedTasks = failedTasks;
-            executionDbComplete.TotalErrors = totalErrors;
-            await dbContextForComplete.SaveChangesAsync();
+            executionDb.TotalTasks = totalTasks;
+            executionDb.CompletedTasks = completedTasks;
+            executionDb.FailedTasks = failedTasks;
+            executionDb.TotalErrors = totalErrors;
 
-            // Eğer akış içindeyse FlowGroupAssignment'ı da güncelle
-            if (!string.IsNullOrEmpty(executionDbComplete.FlowItemExecutionId))
+            if (shouldActuallyComplete)
             {
-                var flowExecution = await dbContextForComplete.FlowExecutionHistories.FindAsync(executionDbComplete.FlowItemExecutionId);
-                if (flowExecution != null)
+                if (_activeGroupExecutions.ContainsKey(executionDb.Id))
                 {
-                    var assignment = await dbContextForComplete.FlowGroupAssignments
-                        .FirstOrDefaultAsync(a => a.FlowItemId == flowExecution.FlowItemId && a.GroupId == executionDbComplete.GroupId);
-                    
-                    if (assignment != null)
+                    _activeGroupExecutions.TryRemove(executionDb.Id, out _);
+                }
+                executionDb.EndTime = DateTime.Now;
+                executionDb.Status = status ?? (failedTasks > 0 ? TaskItemStatus.Failed : TaskItemStatus.Completed);
+
+                // Eğer akış içindeyse FlowGroupAssignment'ı da güncelle
+                if (!string.IsNullOrEmpty(executionDb.FlowItemExecutionId))
+                {
+                    var flowExecution = await dbContext.FlowExecutionHistories.FindAsync(executionDb.FlowItemExecutionId);
+                    if (flowExecution != null)
                     {
-                        assignment.Status = failedTasks > 0 ? TaskItemStatus.Failed : TaskItemStatus.Completed;
-                        assignment.EndTime = DateTime.Now;
-                        assignment.UpdatedAt = DateTime.UtcNow;
-                        await dbContextForComplete.SaveChangesAsync();
+                        var assignment = await dbContext.FlowGroupAssignments
+                            .FirstOrDefaultAsync(a => a.FlowItemId == flowExecution.FlowItemId && a.GroupId == executionDb.GroupId);
+                        
+                        if (assignment != null)
+                        {
+                            assignment.Status = executionDb.Status;
+                            assignment.EndTime = DateTime.Now;
+                            assignment.UpdatedAt = DateTime.UtcNow;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Ara güncelleme: Statü belirtilmemişse 'Running' olarak tut
+                executionDb.Status = status ?? TaskItemStatus.Running;
+                
+                // ÖNEMLİ: Eğer daha önce bitmişse ama şimdi bitmemiş deniyorsa (örneğin retry başladığı için), EndTime'ı temizle
+                if (executionDb.EndTime != null)
+                {
+                    executionDb.EndTime = null;
+                    // Aktif listesine geri ekle ki tracking devam etsin
+                    _activeGroupExecutions[executionDb.Id] = executionDb;
+                }
+                
+                // FlowGroupAssignment'ı da 'Running' yap
+                if (!string.IsNullOrEmpty(executionDb.FlowItemExecutionId))
+                {
+                    var flowExecution = await dbContext.FlowExecutionHistories.FindAsync(executionDb.FlowItemExecutionId);
+                    if (flowExecution != null)
+                    {
+                        var assignment = await dbContext.FlowGroupAssignments
+                            .FirstOrDefaultAsync(a => a.FlowItemId == flowExecution.FlowItemId && a.GroupId == executionDb.GroupId);
+                        
+                        if (assignment != null && assignment.Status != TaskItemStatus.Running)
+                        {
+                            assignment.Status = TaskItemStatus.Running;
+                            assignment.EndTime = null; // Bitiş zamanını temizle
+                            assignment.UpdatedAt = DateTime.UtcNow;
+                        }
                     }
                 }
             }
             
-            if (_activeGroupExecutions.ContainsKey(executionDbComplete.GroupId))
-            {
-                _activeGroupExecutions.Remove(executionDbComplete.GroupId);
-            }
+            await dbContext.SaveChangesAsync();
         }
     }
 
-    public async Task<List<TaskExecutionHistory>> GetTaskExecutionHistoriesAsync(string? taskItemId = null, string? groupId = null, DateTime? startDate = null, DateTime? endDate = null)
+    public async Task<List<TaskExecutionHistory>> GetTaskExecutionHistoriesAsync(string? taskItemId = null, string? groupId = null, string? groupExecutionId = null, string? flowItemExecutionId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var dbContext = GetDbContext();
         if (dbContext == null)
@@ -616,6 +693,16 @@ public class ExecutionHistoryService : IExecutionHistoryService
             query = query.Where(e => e.GroupId == groupId);
         }
 
+        if (!string.IsNullOrEmpty(groupExecutionId))
+        {
+            query = query.Where(e => e.GroupExecutionId == groupExecutionId);
+        }
+
+        if (!string.IsNullOrEmpty(flowItemExecutionId))
+        {
+            query = query.Where(e => e.FlowItemExecutionId == flowItemExecutionId);
+        }
+
         if (startDate.HasValue)
         {
             query = query.Where(e => e.StartTime >= startDate.Value);
@@ -629,12 +716,22 @@ public class ExecutionHistoryService : IExecutionHistoryService
         return await query.OrderByDescending(e => e.StartTime).ToListAsync();
     }
 
-    public async Task<List<GroupExecutionHistory>> GetGroupExecutionHistoriesAsync(string? groupId = null, DateTime? startDate = null, DateTime? endDate = null)
+    public async Task<List<GroupExecutionHistory>> GetGroupExecutionHistoriesAsync(string? groupId = null, string? flowItemExecutionId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var dbContext = GetDbContext();
         if (dbContext == null)
         {
-            return new List<GroupExecutionHistory>();
+            var activeList = _activeGroupExecutions.Values.ToList();
+            if (!string.IsNullOrEmpty(groupId))
+            {
+                activeList = activeList.Where(e => e.GroupId == groupId).ToList();
+            }
+            // JSON modunda flowItemExecutionId'ye göre filtreleme desteği eklendi
+            if (!string.IsNullOrEmpty(flowItemExecutionId))
+            {
+                activeList = activeList.Where(e => e.FlowItemExecutionId == flowItemExecutionId).ToList();
+            }
+            return activeList;
         }
 
         var query = dbContext.GroupExecutionHistories.AsQueryable();
@@ -642,6 +739,11 @@ public class ExecutionHistoryService : IExecutionHistoryService
         if (!string.IsNullOrEmpty(groupId))
         {
             query = query.Where(e => e.GroupId == groupId);
+        }
+
+        if (!string.IsNullOrEmpty(flowItemExecutionId))
+        {
+            query = query.Where(e => e.FlowItemExecutionId == flowItemExecutionId);
         }
 
         if (startDate.HasValue)
@@ -682,9 +784,10 @@ public class ExecutionHistoryService : IExecutionHistoryService
     // Aktif execution'ı task item ID'ye göre bul
     public async Task<TaskExecutionHistory?> GetActiveTaskExecutionAsync(string taskItemId)
     {
-        if (_activeTaskExecutions.TryGetValue(taskItemId, out var execution))
+        var activeHistory = _activeTaskExecutions.Values.FirstOrDefault(e => e.TaskItemId == taskItemId);
+        if (activeHistory != null)
         {
-            return execution;
+            return activeHistory;
         }
 
         var dbContext = GetDbContext();
@@ -702,9 +805,10 @@ public class ExecutionHistoryService : IExecutionHistoryService
     // Aktif group execution'ı bul
     public async Task<GroupExecutionHistory?> GetActiveGroupExecutionAsync(string groupId)
     {
-        if (_activeGroupExecutions.TryGetValue(groupId, out var execution))
+        var activeHistory = _activeGroupExecutions.Values.FirstOrDefault(e => e.GroupId == groupId);
+        if (activeHistory != null)
         {
-            return execution;
+            return activeHistory;
         }
 
         var dbContext = GetDbContext();
@@ -717,6 +821,91 @@ public class ExecutionHistoryService : IExecutionHistoryService
         }
 
         return null;
+    }
+
+    public async Task<List<GroupExecutionHistory>> GetAllActiveGroupExecutionsAsync()
+    {
+        var result = new Dictionary<string, GroupExecutionHistory>();
+        
+        // Önce memorydekileri al
+        foreach (var e in _activeGroupExecutions.Values) result[e.Id] = e;
+
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            // DB'den EndTime null olanları da getir (Memorydekiler daha günceldir, ezme)
+            var dbActive = await dbContext.GroupExecutionHistories
+                .Where(e => e.EndTime == null)
+                .ToListAsync();
+            
+            foreach (var e in dbActive)
+            {
+                if (!result.ContainsKey(e.Id))
+                {
+                    result[e.Id] = e;
+                    // Memory'ye de ekle ki sonraki kontrollerde hızlı olsun
+                    _activeGroupExecutions.TryAdd(e.Id, e);
+                }
+            }
+        }
+
+        return result.Values.ToList();
+    }
+
+    public async Task<List<FlowExecutionHistory>> GetAllActiveFlowExecutionsAsync()
+    {
+        var result = new Dictionary<string, FlowExecutionHistory>();
+        
+        // Memory
+        foreach (var e in _activeFlowExecutions.Values) result[e.Id] = e;
+
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            // DB'den Status Running olanları veya EndTime null olanları al
+            var dbActive = await dbContext.FlowExecutionHistories
+                .Where(e => e.Status == "Running" || e.EndTime == null)
+                .ToListAsync();
+            
+            foreach (var e in dbActive)
+            {
+                if (!result.ContainsKey(e.Id))
+                {
+                    result[e.Id] = e;
+                    _activeFlowExecutions.TryAdd(e.Id, e);
+                }
+            }
+        }
+
+        return result.Values.ToList();
+    }
+
+    public async Task<List<TaskExecutionHistory>> GetAllActiveTaskExecutionsAsync()
+    {
+        var result = new Dictionary<string, TaskExecutionHistory>();
+        
+        // Memory
+        foreach (var e in _activeTaskExecutions.Values) result[e.Id] = e;
+
+        var dbContext = GetDbContext();
+        if (dbContext != null)
+        {
+            // DB'den EndTime null olanları al
+            var dbActive = await dbContext.TaskExecutionHistories
+                .Where(e => e.EndTime == null && e.FinalStatus == TaskItemStatus.Running)
+                .ToListAsync();
+            
+            foreach (var e in dbActive)
+            {
+                if (!result.ContainsKey(e.Id))
+                {
+                    result[e.Id] = e;
+                    _activeTaskExecutions.TryAdd(e.Id, e);
+                }
+            }
+        }
+
+        return result.Values.ToList();
     }
 
     // Bugün başlamış en son group execution'ı bul
@@ -772,162 +961,183 @@ public class ExecutionHistoryService : IExecutionHistoryService
             .FirstOrDefaultAsync();
     }
 
-    public async Task<Dictionary<string, TaskItemStatus>> GetTodayTaskStatusesByGroupAsync()
+    public async Task<Dictionary<string, TaskItemStatus>> GetTodayTaskStatusesByGroupAsync(string? groupExecutionId = null, string? flowItemExecutionId = null)
     {
         var dbContext = GetDbContext();
         var result = new Dictionary<string, TaskItemStatus>();
         
-        if (_dataService == null)
-        {
-            return result;
-        }
-        // Tüm grupları al
-        var data = await _dataService.GetDataAsync();
-        var groups = data.Groups;
+        if (_dataService == null) return result;
+
         var todayStart = DateTime.Now.Date;
         var todayEnd = todayStart.AddDays(1);
 
         if (dbContext == null)
         {
-            // JSON modunda - aktif execution'lardan bugün başlamış olanları al
-            foreach (var group in groups)
+            // JSON modunda - sadece aktif olanları kontrol et (geçmiş sınırlı)
+            IEnumerable<TaskExecutionHistory> activeExecs;
+
+            if (!string.IsNullOrEmpty(groupExecutionId))
             {
-                var latestGroupExecution = _activeGroupExecutions.Values
-                    .Where(e => e.GroupId == group.Id && e.StartTime.Date == todayStart)
-                    .OrderByDescending(e => e.StartTime)
-                    .FirstOrDefault();
-
-                if (latestGroupExecution == null)
-                {
-                    continue;
-                }
-
-                var taskExecutions = _activeTaskExecutions.Values
-                    .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
-                    .OrderByDescending(e => e.StartTime)
-                    .ToList();
-
-                var taskExecutionsByTaskId = taskExecutions
-                    .GroupBy(e => e.TaskItemId)
-                    .ToDictionary(g => g.Key, g => g.First());
-
-                foreach (var kvp in taskExecutionsByTaskId)
-                {
-                    var key = $"{group.Id}-{kvp.Key}";
-                    result[key] = kvp.Value.FinalStatus;
-                }
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.GroupExecutionId == groupExecutionId);
             }
-            return result;
-        }
-
-        // Veritabanı modunda - her grup için bugün başlamış en son group execution'ı bul
-        foreach (var group in groups)
-        {
-            var latestGroupExecution = await dbContext.GroupExecutionHistories
-                .Where(e => e.GroupId == group.Id && e.StartTime >= todayStart && e.StartTime < todayEnd)
-                .OrderByDescending(e => e.StartTime)
-                .FirstOrDefaultAsync();
-
-            if (latestGroupExecution == null)
+            else if (!string.IsNullOrEmpty(flowItemExecutionId))
             {
-                continue;
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.FlowItemExecutionId == flowItemExecutionId);
             }
-
-            var taskExecutions = await dbContext.TaskExecutionHistories
-                .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
-                .OrderByDescending(e => e.EndTime ?? e.StartTime)
-                .ThenByDescending(e => e.StartTime)
-                .ToListAsync();
-
-            var taskExecutionsByTaskId = taskExecutions
-                .GroupBy(e => e.TaskItemId)
-                .ToDictionary(g => g.Key, g => g.First());
-
-            foreach (var kvp in taskExecutionsByTaskId)
+            else
             {
-                var key = $"{group.Id}-{kvp.Key}";
-                result[key] = kvp.Value.FinalStatus;
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.StartTime.Date == todayStart);
             }
-        }
-
-        return result;
-    }
-
-    public async Task<Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>> GetTodayTaskStatusesWithErrorsByGroupAsync()
-    {
-        var dbContext = GetDbContext();
-        var result = new Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>();
-        
-        if (_dataService == null)
-        {
-            return result;
-        }
-
-        // Tüm grupları al
-        var data = await _dataService.GetDataAsync();
-        var groups = data.Groups;
-        var todayStart = DateTime.Now.Date;
-        var todayEnd = todayStart.AddDays(1);
-
-        if (dbContext == null)
-        {
-            // JSON modunda - aktif execution'lardan bugün başlamış olanları al
-            foreach (var group in groups)
+            
+            // Her task için en son statüyü al
+            foreach (var exec in activeExecs.OrderByDescending(e => e.StartTime))
             {
-                var latestGroupExecution = _activeGroupExecutions.Values
-                    .Where(e => e.GroupId == group.Id && e.StartTime.Date == todayStart)
-                    .OrderByDescending(e => e.StartTime)
-                    .FirstOrDefault();
-
-                if (latestGroupExecution == null)
+                if (!string.IsNullOrEmpty(exec.GroupId))
                 {
-                    continue;
-                }
-
-                var taskExecutions = _activeTaskExecutions.Values
-                    .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
-                    .OrderByDescending(e => e.StartTime)
-                    .ToList();
-
-                var taskExecutionsByTaskId = taskExecutions
-                    .GroupBy(e => e.TaskItemId)
-                    .ToDictionary(g => g.Key, g => g.First());
-
-                foreach (var kvp in taskExecutionsByTaskId)
-                {
-                    var key = $"{group.Id}-{kvp.Key}";
-                    result[key] = (kvp.Value.FinalStatus, kvp.Value.ErrorMessage);
+                    var key = $"{exec.GroupId}-{exec.TaskItemId}";
+                    if (!result.ContainsKey(key))
+                    {
+                        result[key] = exec.FinalStatus;
+                    }
                 }
             }
             return result;
         }
 
         // Veritabanı modunda
-        foreach (var group in groups)
+        IQueryable<TaskExecutionHistory> query = dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd);
+
+        if (!string.IsNullOrEmpty(groupExecutionId))
         {
-            var latestGroupExecution = await dbContext.GroupExecutionHistories
-                .Where(e => e.GroupId == group.Id && e.StartTime >= todayStart && e.StartTime < todayEnd)
-                .OrderByDescending(e => e.StartTime)
-                .FirstOrDefaultAsync();
-
-            if (latestGroupExecution == null)
-            {
-                continue;
-            }
-
-            var taskExecutions = await dbContext.TaskExecutionHistories
-                .Where(e => e.GroupExecutionId == latestGroupExecution.Id && e.StartTime >= latestGroupExecution.StartTime)
-                .OrderByDescending(e => e.StartTime)
+            query = query.Where(e => e.GroupExecutionId == groupExecutionId);
+        }
+        else if (!string.IsNullOrEmpty(flowItemExecutionId))
+        {
+            query = query.Where(e => e.FlowItemExecutionId == flowItemExecutionId);
+        }
+        else
+        {
+            // ÖNEMLİ: Eğer hiçbir ID verilmemişse (Global Monitoring), 
+            // her grubun bugünkü EN SON çalışmasına (latest group execution) ait taskları al.
+            var latestGroupExecIds = await dbContext.GroupExecutionHistories
+                .Where(gh => gh.StartTime >= todayStart && gh.StartTime < todayEnd)
+                .GroupBy(gh => gh.GroupId)
+                .Select(g => g.OrderByDescending(gh => gh.StartTime).Select(gh => gh.Id).FirstOrDefault())
+                .Where(id => id != null)
                 .ToListAsync();
 
-            var taskExecutionsByTaskId = taskExecutions
-                .GroupBy(e => e.TaskItemId)
-                .ToDictionary(g => g.Key, g => g.First());
+            query = query.Where(e => latestGroupExecIds.Contains(e.GroupExecutionId));
+        }
 
-            foreach (var kvp in taskExecutionsByTaskId)
+        var taskExecutions = await query
+            .OrderByDescending(e => e.StartTime)
+            .ToListAsync();
+
+        // Her task için en son statüyü al
+        foreach (var exec in taskExecutions)
+        {
+            if (!string.IsNullOrEmpty(exec.GroupId))
             {
-                var key = $"{group.Id}-{kvp.Key}";
-                result[key] = (kvp.Value.FinalStatus, kvp.Value.ErrorMessage);
+                var key = $"{exec.GroupId}-{exec.TaskItemId}";
+                if (!result.ContainsKey(key))
+                {
+                    result[key] = exec.FinalStatus;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>> GetTodayTaskStatusesWithErrorsByGroupAsync(string? groupExecutionId = null, string? flowItemExecutionId = null)
+    {
+        var dbContext = GetDbContext();
+        var result = new Dictionary<string, (TaskItemStatus Status, string? ErrorMessage)>();
+        
+        if (_dataService == null) return result;
+
+        var todayStart = DateTime.Now.Date;
+        var todayEnd = todayStart.AddDays(1);
+
+        if (dbContext == null)
+        {
+            // JSON modunda
+            IEnumerable<TaskExecutionHistory> activeExecs;
+
+            if (!string.IsNullOrEmpty(groupExecutionId))
+            {
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.GroupExecutionId == groupExecutionId);
+            }
+            else if (!string.IsNullOrEmpty(flowItemExecutionId))
+            {
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.FlowItemExecutionId == flowItemExecutionId);
+            }
+            else
+            {
+                activeExecs = _activeTaskExecutions.Values
+                    .Where(e => e.StartTime.Date == todayStart);
+            }
+            
+            // Her task için en son statüyü al
+            foreach (var exec in activeExecs.OrderByDescending(e => e.StartTime))
+            {
+                if (!string.IsNullOrEmpty(exec.GroupId))
+                {
+                    var key = $"{exec.GroupId}-{exec.TaskItemId}";
+                    if (!result.ContainsKey(key))
+                    {
+                        result[key] = (exec.FinalStatus, exec.ErrorMessage);
+                    }
+                }
+            }
+            return result;
+        }
+
+        // Veritabanı modunda
+        IQueryable<TaskExecutionHistory> query = dbContext.TaskExecutionHistories
+            .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd);
+
+        if (!string.IsNullOrEmpty(groupExecutionId))
+        {
+            query = query.Where(e => e.GroupExecutionId == groupExecutionId);
+        }
+        else if (!string.IsNullOrEmpty(flowItemExecutionId))
+        {
+            query = query.Where(e => e.FlowItemExecutionId == flowItemExecutionId);
+        }
+        else
+        {
+            // ÖNEMLİ: Eğer hiçbir ID verilmemişse (Global Monitoring), 
+            // her grubun bugünkü EN SON çalışmasına (latest group execution) ait taskları al.
+            var latestGroupExecIds = await dbContext.GroupExecutionHistories
+                .Where(gh => gh.StartTime >= todayStart && gh.StartTime < todayEnd)
+                .GroupBy(gh => gh.GroupId)
+                .Select(g => g.OrderByDescending(gh => gh.StartTime).Select(gh => gh.Id).FirstOrDefault())
+                .Where(id => id != null)
+                .ToListAsync();
+
+            query = query.Where(e => latestGroupExecIds.Contains(e.GroupExecutionId));
+        }
+
+        var taskExecutions = await query
+            .OrderByDescending(e => e.StartTime)
+            .ToListAsync();
+
+        foreach (var exec in taskExecutions)
+        {
+            if (!string.IsNullOrEmpty(exec.GroupId))
+            {
+                var key = $"{exec.GroupId}-{exec.TaskItemId}";
+                if (!result.ContainsKey(key))
+                {
+                    result[key] = (exec.FinalStatus, exec.ErrorMessage);
+                }
             }
         }
 
@@ -1035,6 +1245,8 @@ public class ExecutionHistoryService : IExecutionHistoryService
         //}
 
         // Database mode: query directly with date filters to limit scanned rows
+        if (dbContext == null) return result;
+
         result.TotalFlowsToday = await dbContext.FlowExecutionHistories
             .Where(e => e.StartTime >= todayStart && e.StartTime < todayEnd)
             .CountAsync();
