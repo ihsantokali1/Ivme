@@ -570,7 +570,7 @@ public class ExecutionHistoryService : IExecutionHistoryService
         return await query.OrderByDescending(e => e.StartTime).ToListAsync();
     }
 
-    public async Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, TaskItemStatus? status = null, bool isFinished = true)
+    public async Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, int markedAsSuccessTasks = 0, TaskItemStatus? status = null, bool isFinished = true)
     {
         // ÖNEMLİ: Eğer isFinished false ise veya tüm tasklar bitmemişse EndTime set edilmez
         bool shouldActuallyComplete = isFinished;
@@ -590,7 +590,22 @@ public class ExecutionHistoryService : IExecutionHistoryService
                 if (shouldActuallyComplete)
                 {
                     execution.EndTime = DateTime.Now;
-                    execution.Status = status ?? (failedTasks > 0 ? TaskItemStatus.Failed : TaskItemStatus.Completed);
+                    if (status.HasValue)
+                    {
+                        execution.Status = status.Value;
+                    }
+                    else if (failedTasks > 0)
+                    {
+                        execution.Status = TaskItemStatus.Failed;
+                    }
+                    else if (markedAsSuccessTasks > 0)
+                    {
+                        execution.Status = TaskItemStatus.MarkedAsSuccess;
+                    }
+                    else
+                    {
+                        execution.Status = TaskItemStatus.Completed;
+                    }
                     _activeGroupExecutions.TryRemove(execution.Id, out _);
                 }
                 else
@@ -617,7 +632,23 @@ public class ExecutionHistoryService : IExecutionHistoryService
                     _activeGroupExecutions.TryRemove(executionDb.Id, out _);
                 }
                 executionDb.EndTime = DateTime.Now;
-                executionDb.Status = status ?? (failedTasks > 0 ? TaskItemStatus.Failed : TaskItemStatus.Completed);
+                
+                if (status.HasValue)
+                {
+                    executionDb.Status = status.Value;
+                }
+                else if (failedTasks > 0)
+                {
+                    executionDb.Status = TaskItemStatus.Failed;
+                }
+                else if (markedAsSuccessTasks > 0)
+                {
+                    executionDb.Status = TaskItemStatus.MarkedAsSuccess;
+                }
+                else
+                {
+                    executionDb.Status = TaskItemStatus.Completed;
+                }
 
                 // Eğer akış içindeyse FlowGroupAssignment'ı da güncelle
                 if (!string.IsNullOrEmpty(executionDb.FlowItemExecutionId))

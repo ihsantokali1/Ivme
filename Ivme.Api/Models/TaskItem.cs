@@ -11,6 +11,7 @@ public class TaskItem
     public DateTime? LastErrorTime { get; set; }
     public int RetryDelayMinutes { get; set; } = 60; // Hata sonrası bekleme süresi (dakika)
     public int TimeoutMinutes { get; set; } = 720; // Zaman aşımı süresi (dakika) - Varsayılan 12 saat
+    public int MaxRetryCount { get; set; } = 3; // Hata durumunda kaç kez tekrar deneneceği
     public int Progress { get; set; } = 0; // 0-100 arası ilerleme
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

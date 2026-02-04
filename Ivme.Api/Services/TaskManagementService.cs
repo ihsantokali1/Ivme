@@ -1189,8 +1189,8 @@ public class TaskManagementService : ITaskManagementService
                         
                         if (todayExecution != null && todayExecution.FinalStatus == TaskItemStatus.Failed)
                         {
-                            // RetryCount kontrolü: 3'ten fazla retry varsa tekrar çalıştırma
-                            if (todayExecution.RetryCount >= 3)
+                            // RetryCount kontrolü: MaxRetryCount'tan fazla retry varsa tekrar çalıştırma
+                            if (todayExecution.RetryCount >= taskItem.MaxRetryCount)
                             {
                                 return; // Retry mekanizmasını durdur
                             }
@@ -1411,7 +1411,7 @@ public class TaskManagementService : ITaskManagementService
                         if (latestFailed != null && latestFailed.EndTime.HasValue)
                         {
                             var timeSinceError = DateTime.Now - latestFailed.EndTime.Value;
-                            if (timeSinceError.TotalMinutes >= retryDelay && latestFailed.RetryCount < 3)
+                            if (timeSinceError.TotalMinutes >= retryDelay && latestFailed.RetryCount < taskItem.MaxRetryCount)
                             {
                                 Console.WriteLine($"[STATUS] Task '{taskItem.Name}' in Exec {groupExec.Id} -> WaitingRetry (Retry {latestFailed.RetryCount + 1})");
                                 await _executionHistoryService.UpdateTaskExecutionStatusAsync(latestFailed.Id, TaskItemStatus.WaitingRetry);
@@ -1510,6 +1510,7 @@ public class TaskManagementService : ITaskManagementService
                     int completedTasks = 0;
                     int failedTasks = 0;
                     int totalErrors = 0;
+                    int markedAsSuccessTasks = 0;
                     bool hasWaitingRetryTasks = false;
                     
                     // Her task'ın durumunu kontrol et
@@ -1519,77 +1520,11 @@ public class TaskManagementService : ITaskManagementService
                     {
                         try
                         {
-                            // ÖNEMLİ: Önce GroupTaskAssignment durumunu kontrol et
-                            // Eğer WaitingRetry durumundaysa, grup henüz tamamlanmamalı
-                            if (assignment.Status == TaskItemStatus.WaitingRetry)
-                            {
-                                // Task'ın retry sayısını kontrol et
-                                var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                if (taskItem != null)
-                                {
-                                    // TaskExecutionHistory'den en son execution'ı bul ve RetryCount'u kontrol et
-                                    TaskExecutionHistory? latestExecution = null;
-                                    
-                                    if (dbContext != null)
-                                    {
-                                        latestExecution = await dbContext.TaskExecutionHistories
-                                            .Where(e => e.TaskItemId == assignment.TaskItemId && 
-                                                       e.GroupId == group.Id && 
-                                                       e.StartTime.Date == today &&
-                                                       e.GroupExecutionId == activeGroupExecution.Id)
-                                            .OrderByDescending(e => e.StartTime)
-                                            .FirstOrDefaultAsync();
-                                    }
-                                    
-                                    // Eğer RetryCount < 3 ise, henüz retry yapılabilir, grup tamamlanmamalı
-                                    if (latestExecution != null && latestExecution.RetryCount < 3)
-                                    {
-                                        hasWaitingRetryTasks = true;
-                                        Console.WriteLine($"[CheckAndCompleteGroupExecutionsAsync] Task {assignment.TaskItemId} in group {group.Id} is WaitingRetry with RetryCount={latestExecution.RetryCount}, group execution cannot be completed yet");
-                                    }
-                                }
-                                continue; // WaitingRetry task'ı tamamlanmış sayma
-                            }
-                            
-                            // ÖNEMLİ: GroupTaskAssignment durumunu kontrol et
-                            // Eğer assignment.Status == Failed ise ve retry yapılabilirse, grup tamamlanmamalı
-                            if (assignment.Status == TaskItemStatus.Failed)
-                            {
-                                var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                if (taskItem != null)
-                                {
-                                    // RetryDelayMinutes veya RetryIntervalMinutes kontrolü
-                                    var retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
-                                    
-                                    if (retryDelay > 0)
-                                    {
-                                        // TaskExecutionHistory'den RetryCount'u kontrol et
-                                        TaskExecutionHistory? failedExecution = null;
-                                        
-                                        if (dbContext != null)
-                                        {
-                                            failedExecution = await dbContext.TaskExecutionHistories
-                                                .Where(e => e.TaskItemId == assignment.TaskItemId && 
-                                                           e.GroupId == group.Id && 
-                                                           e.StartTime.Date == today &&
-                                                           e.GroupExecutionId == activeGroupExecution.Id &&
-                                                           e.FinalStatus == TaskItemStatus.Failed)
-                                                .OrderByDescending(e => e.StartTime)
-                                                .FirstOrDefaultAsync();
-                                        }
-                                        
-                                        if (failedExecution != null && failedExecution.RetryCount < 3)
-                                        {
-                                            hasWaitingRetryTasks = true;
-                                            continue; // Bu task'ı tamamlanmış sayma
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // TaskExecutionHistory'den bu grup çalışmasına ait execution'ı bul
+                            var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
+                            if (taskItem == null) continue;
+
+                            // 1. TaskExecutionHistory'den bu grup çalışmasına ait execution'ı bul
                             TaskExecutionHistory? todayExecution = null;
-                            
                             if (dbContext != null)
                             {
                                 todayExecution = await dbContext.TaskExecutionHistories
@@ -1601,7 +1536,6 @@ public class TaskManagementService : ITaskManagementService
                             }
                             else
                             {
-                                // JSON modunda - execution history service'ten al
                                 var taskHistories = await _executionHistoryService.GetTaskExecutionHistoriesAsync(
                                     taskItemId: assignment.TaskItemId,
                                     groupId: group.Id,
@@ -1613,79 +1547,63 @@ public class TaskManagementService : ITaskManagementService
                                     .FirstOrDefault();
                             }
 
-                            // ÖNEMLİ: Hata sayısını her durumda ekle (WaitingRetry veya Failed farketmez)
                             if (todayExecution != null)
                             {
                                 totalErrors += todayExecution.ErrorCount;
                             }
-                            
-                            // ÖNEMLİ: Statü ve sayaç mantığı
-                            if (assignment.Status == TaskItemStatus.WaitingRetry)
+
+                            // 2. Durum Belirleme ve Metrik Sayımı
+                            // ÖNEMLİ: assignment.Status veya todayExecution.FinalStatus kullanılabilir
+                            var currentStatus = assignment.Status;
+                            if (todayExecution != null && todayExecution.EndTime != null)
                             {
-                                // WaitingRetry durumundaki taskları "sayı" olarak başarısız sayıyoruz (user isteği)
-                                failedTasks++;
-                                hasWaitingRetryTasks = true;
-                                continue;
+                                currentStatus = todayExecution.FinalStatus;
                             }
-                            
-                            if (assignment.Status == TaskItemStatus.Failed)
+
+                            if (currentStatus == TaskItemStatus.Completed)
                             {
-                                var taskItem = data.TaskItems.FirstOrDefault(t => t.Id == assignment.TaskItemId);
-                                if (taskItem != null)
+                                completedTasks++;
+                            }
+                            else if (currentStatus == TaskItemStatus.MarkedAsSuccess)
+                            {
+                                completedTasks++;
+                                markedAsSuccessTasks++;
+                            }
+                            else if (currentStatus == TaskItemStatus.Failed || currentStatus == TaskItemStatus.WaitingRetry)
+                            {
+                                // Retry kontrolü
+                                bool canRetry = false;
+                                if (taskItem.MaxRetryCount > 0)
                                 {
-                                    var retryDelay = taskItem.RetryIntervalMinutes > 0 ? taskItem.RetryIntervalMinutes : taskItem.RetryDelayMinutes;
-                                    if (retryDelay > 0 && todayExecution != null && todayExecution.RetryCount < 3)
+                                    int retryCount = todayExecution?.RetryCount ?? 0;
+                                    if (retryCount < taskItem.MaxRetryCount)
                                     {
-                                        // Hala retry yapılabilir
-                                        failedTasks++;
-                                        hasWaitingRetryTasks = true;
-                                        continue;
+                                        canRetry = true;
                                     }
                                 }
-                                // Retry kalmadı, kesin başarısız
-                                failedTasks++;
-                                continue;
-                            }
-                            
-                            if (todayExecution != null)
-                            {
-                                if (todayExecution.EndTime.HasValue)
+
+                                if (canRetry)
                                 {
-                                    if (todayExecution.FinalStatus == TaskItemStatus.Completed || 
-                                        todayExecution.FinalStatus == TaskItemStatus.MarkedAsSuccess)
-                                    {
-                                        completedTasks++;
-                                    }
-                                    else if (todayExecution.FinalStatus == TaskItemStatus.Failed)
-                                    {
-                                        failedTasks++;
-                                    }
+                                    hasWaitingRetryTasks = true;
+                                    // TALEBE İSTİNADEN: WaitingRetry durumundakiler de 'failedTasks' olarak sayılsın (metrik için)
+                                    failedTasks++; 
+                                    Console.WriteLine($"[CheckAndCompleteGroup] Task '{taskItem.Name}' is currently {currentStatus}, waiting for retry { (todayExecution?.RetryCount ?? 0) + 1 }/{taskItem.MaxRetryCount}");
                                 }
                                 else
                                 {
-                                    // Çalışıyor veya Bekliyor
-                                    if (todayExecution.FinalStatus == TaskItemStatus.Running || 
-                                        todayExecution.FinalStatus == TaskItemStatus.Pending ||
-                                        todayExecution.FinalStatus == TaskItemStatus.Ready)
-                                    {
-                                        hasWaitingRetryTasks = true;
-                                    }
+                                    failedTasks++;
+                                    Console.WriteLine($"[CheckAndCompleteGroup] Task '{taskItem.Name}' failed and exhausted all {taskItem.MaxRetryCount} retries.");
                                 }
                             }
                             else
                             {
-                                // Execution yok, bekliyor
-                                if (assignment.Status == TaskItemStatus.Pending || 
-                                    assignment.Status == TaskItemStatus.Ready ||
-                                    assignment.Status == TaskItemStatus.Running)
-                                {
-                                    hasWaitingRetryTasks = true;
-                                }
+                                // Pending, Running, Ready vb.
+                                hasWaitingRetryTasks = true;
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Hata olsa bile devam et
+                            Console.WriteLine($"[CheckAndCompleteGroup] Error evaluating task {assignment.TaskItemId}: {ex.Message}");
                         }
                     }
                     
@@ -1694,8 +1612,9 @@ public class TaskManagementService : ITaskManagementService
                     // Bu yüzden hasWaitingRetryTasks kontrolünü bitiş kontrolünden çıkarıyoruz.
                     // Ancak Running task varsa bitmemeli.
                     bool allTasksProcessed = (completedTasks + failedTasks) == totalTasks;
-                    
-                    Console.WriteLine($"[CheckAndCompleteGroup] Group '{group.Name}' ({activeGroupExecution.Id}): Total={totalTasks}, Completed={completedTasks}, Failed={failedTasks}, Errors={totalErrors}, Processed={allTasksProcessed}");
+                    bool isActuallyFinished = allTasksProcessed && !hasWaitingRetryTasks;
+
+                    Console.WriteLine($"[CheckAndCompleteGroup] Group '{group.Name}' ({activeGroupExecution.Id}): Total={totalTasks}, Completed={completedTasks}, Failed={failedTasks}, Errors={totalErrors}, Finished={isActuallyFinished}");
 
                     // metrikleri güncelle
                     await _executionHistoryService.CompleteGroupExecutionAsync(
@@ -1704,11 +1623,12 @@ public class TaskManagementService : ITaskManagementService
                         completedTasks,
                         failedTasks,
                         totalErrors,
-                        status: allTasksProcessed ? null : TaskItemStatus.Running,
-                        isFinished: allTasksProcessed
+                        markedAsSuccessTasks,
+                        status: isActuallyFinished ? null : TaskItemStatus.Running,
+                        isFinished: isActuallyFinished
                     );
 
-                    if (allTasksProcessed)
+                    if (isActuallyFinished)
                     {
                         Console.WriteLine($"[STATUS] Group '{group.Name}' -> Finished (Status: {(failedTasks > 0 ? "Failed" : "Completed")})");
                         
@@ -1741,11 +1661,16 @@ public class TaskManagementService : ITaskManagementService
             var historyService = _executionHistoryService as ExecutionHistoryService;
             if (historyService == null) return;
 
-            // Tüm aktif flow execution'larını al
-            var activeFlowExecutions = await historyService.GetAllActiveFlowExecutionsAsync();
-            if (activeFlowExecutions == null || activeFlowExecutions.Count == 0) return;
+            // Bugün başlamış tüm flow execution'larını al (Aktif olanlar veya Başarısız bitenler)
+            var today = DateTime.Now.Date;
+            var flowExecutionsForToday = await _executionHistoryService.GetFlowExecutionHistoriesAsync(startDate: today);
+            var flowsToProcess = flowExecutionsForToday
+                .Where(f => f.EndTime == null || f.Status == "Failed")
+                .ToList();
 
-            foreach (var flowExec in activeFlowExecutions.ToList()) // ToList() ile kopya üzerinden dön (concurrency için)
+            if (flowsToProcess.Count == 0) return;
+
+            foreach (var flowExec in flowsToProcess)
             {
                 try
                 {
@@ -1766,17 +1691,19 @@ public class TaskManagementService : ITaskManagementService
                         
                         var latestGroupExec = groupExecutions.OrderByDescending(e => e.StartTime).FirstOrDefault();
                         
-                        // Grup bitmiş mi? (Normal Completed veya MarkedAsSuccess)
+                        // Grup bitmiş mi? (Normal Completed veya MarkedAsSuccess veya Failed)
                         bool isFinished = latestGroupExec != null && 
                                           latestGroupExec.EndTime != null && 
-                                          (latestGroupExec.Status == TaskItemStatus.Completed || latestGroupExec.Status == TaskItemStatus.MarkedAsSuccess || latestGroupExec.Status == TaskItemStatus.Failed);
+                                          (latestGroupExec.Status == TaskItemStatus.Completed || 
+                                           latestGroupExec.Status == TaskItemStatus.MarkedAsSuccess || 
+                                           latestGroupExec.Status == TaskItemStatus.Failed);
                         
                         if (!isFinished)
                         {
                             allGroupsFinished = false;
                         }
                         
-                        if (latestGroupExec != null && latestGroupExec.Status == TaskItemStatus.Failed)
+                        if (latestGroupExec == null || latestGroupExec.Status == TaskItemStatus.Failed)
                         {
                             anyGroupFailed = true;
                         }
@@ -1786,6 +1713,13 @@ public class TaskManagementService : ITaskManagementService
                     {
                         // Flow'u tamamla - Başarısız grup varsa Failed olarak kapa
                         string finalStatus = anyGroupFailed ? "Failed" : "Completed";
+                        
+                        // Eğer zaten Failed ise ve yeni statü yine Failed ise güncellemeye gerek yok
+                        if (flowExec.EndTime != null && flowExec.Status == finalStatus)
+                        {
+                            continue;
+                        }
+
                         await _executionHistoryService.CompleteFlowExecutionAsync(flowExec.Id, finalStatus);
                         Console.WriteLine($"[STATUS] Flow '{flowExec.FlowItemId}' -> Finished ({finalStatus})");
                     }
@@ -2514,6 +2448,7 @@ public class TaskManagementService : ITaskManagementService
                     latestExec.TotalTasks, // Tümünü tamamlanmış say
                     0, 
                     0,
+                    latestExec.TotalTasks, // markedAsSuccessTasks
                     TaskItemStatus.MarkedAsSuccess
                 );
             }

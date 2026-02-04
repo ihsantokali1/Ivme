@@ -12,7 +12,7 @@ public interface IExecutionHistoryService
     Task UpdateTaskExecutionStatusAsync(string executionId, TaskItemStatus status);
     
     Task<GroupExecutionHistory> StartGroupExecutionAsync(string groupId, string triggeredBy = "Manual", string? flowItemId = null, string? flowItemExecutionId = null);
-    Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, TaskItemStatus? status = null, bool isFinished = true);
+    Task CompleteGroupExecutionAsync(string executionId, int totalTasks, int completedTasks, int failedTasks, int totalErrors, int markedAsSuccessTasks = 0, TaskItemStatus? status = null, bool isFinished = true);
     
     // Flow Execution
     Task<FlowExecutionHistory> StartFlowExecutionAsync(string flowItemId, string triggeredBy = "Manual");

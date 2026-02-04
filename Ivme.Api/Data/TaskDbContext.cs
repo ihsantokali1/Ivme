@@ -59,6 +59,8 @@ public class TaskDbContext : DbContext
             entity.Property(e => e.StoredProcedureDatabase).HasMaxLength(100);
             entity.Property(e => e.IsActive)
                 .HasDefaultValue(true); // Eski kayıtlar için default değer
+            entity.Property(e => e.MaxRetryCount)
+                .HasDefaultValue(3);
             
             // Parameters navigation property
             entity.HasMany(e => e.Parameters)
