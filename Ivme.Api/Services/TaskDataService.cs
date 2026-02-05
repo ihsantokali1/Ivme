@@ -244,8 +244,14 @@ public class TaskDataService : ITaskDataService
             existing.EndTime = taskItem.EndTime;
             existing.LastErrorTime = taskItem.LastErrorTime;
             existing.RetryDelayMinutes = taskItem.RetryDelayMinutes;
+            existing.MaxRetryCount = taskItem.MaxRetryCount; // MaxRetryCount güncellemesi
+            existing.TimeoutMinutes = taskItem.TimeoutMinutes; // TimeoutMinutes güncellemesi
             existing.Progress = taskItem.Progress;
             existing.ErrorMessage = taskItem.ErrorMessage;
+            existing.SourceType = taskItem.SourceType;
+            existing.StoredProcedureName = taskItem.StoredProcedureName;
+            existing.StoredProcedureSchema = taskItem.StoredProcedureSchema;
+            existing.StoredProcedureDatabase = taskItem.StoredProcedureDatabase;
             existing.UpdatedAt = DateTime.UtcNow;
             await dbContext.SaveChangesAsync();
             return existing;
@@ -266,8 +272,14 @@ public class TaskDataService : ITaskDataService
         existingJson.EndTime = taskItem.EndTime;
         existingJson.LastErrorTime = taskItem.LastErrorTime;
         existingJson.RetryDelayMinutes = taskItem.RetryDelayMinutes;
+        existingJson.MaxRetryCount = taskItem.MaxRetryCount; // MaxRetryCount güncellemesi
+        existingJson.TimeoutMinutes = taskItem.TimeoutMinutes; // TimeoutMinutes güncellemesi
         existingJson.Progress = taskItem.Progress;
         existingJson.ErrorMessage = taskItem.ErrorMessage;
+        existingJson.SourceType = taskItem.SourceType;
+        existingJson.StoredProcedureName = taskItem.StoredProcedureName;
+        existingJson.StoredProcedureSchema = taskItem.StoredProcedureSchema;
+        existingJson.StoredProcedureDatabase = taskItem.StoredProcedureDatabase;
         existingJson.UpdatedAt = DateTime.UtcNow;
 
         await SaveDataAsync(data);

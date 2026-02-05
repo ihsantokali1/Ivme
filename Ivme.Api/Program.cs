@@ -917,28 +917,65 @@ timer.Elapsed += async (sender, e) =>
         
         using var scope = app.Services.CreateScope();
         var managementService = scope.ServiceProvider.GetRequiredService<ITaskManagementService>();
-        await managementService.CheckAndUpdateTaskItemStatusesAsync();
-        await managementService.CheckAndTriggerScheduledGroupsAsync();
-        await managementService.CheckAndTriggerScheduledFlowsAsync();
+        
+        // 1. Task Item Status Update
+        try
+        {
+            await managementService.CheckAndUpdateTaskItemStatusesAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Timer] ERROR in CheckAndUpdateTaskItemStatusesAsync: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
+
+        // 2. Group Schedules
+        try
+        {
+            await managementService.CheckAndTriggerScheduledGroupsAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Timer] ERROR in CheckAndTriggerScheduledGroupsAsync: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
+
+        // 3. Flow Schedules
+        try
+        {
+            await managementService.CheckAndTriggerScheduledFlowsAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Timer] ERROR in CheckAndTriggerScheduledFlowsAsync: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
     }
     catch (Exception ex)
     {
-        // Hataları logla ama uygulamayı durdurma
-        Console.WriteLine($"[Timer] ERROR: Task item status check error: {ex.Message}");
+        // Genel timer hatası (scope oluşturma vb.)
+        Console.WriteLine($"[Timer] CRITICAL ERROR: {ex.Message}");
         Console.WriteLine($"[Timer] Stack trace: {ex.StackTrace}");
     }
     finally
     {
         // İşlem bittiğinde timer'ı tekrar başlat
-        if (timer.Enabled)
+        // NOT: AutoReset = false olduğu için timer tetiklendiğinde Enabled otomatik false olur.
+        // Bu yüzden if (timer.Enabled) kontrolü yapmadan başlatmalıyız.
+        try 
         {
             timer.Start();
+        }
+        catch
+        {
+            // Timer dispose edilmiş olabilir (app shutdown)
         }
     }
 };
 
-// Timer'ın başladığını logla
-Console.WriteLine($"[Timer] Scheduled group timer started. Will check every 1 minute. Current time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+// Timer'ın başladığını logla ve başlat
+timer.Start();
+Console.WriteLine($"[Timer] Scheduled group timer started. Will check every 5 seconds. Current time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
 
 app.Run();
 

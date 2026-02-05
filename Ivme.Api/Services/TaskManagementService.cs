@@ -1189,12 +1189,20 @@ public class TaskManagementService : ITaskManagementService
                         
                         if (todayExecution != null && todayExecution.FinalStatus == TaskItemStatus.Failed)
                         {
+                            Console.WriteLine($"[FailTaskItemAsync] Retry Logic Check -> Task: {taskItem.Name} ({taskItemId})");
+                            Console.WriteLine($"[FailTaskItemAsync] ExecutionId: {todayExecution.Id}");
+                            Console.WriteLine($"[FailTaskItemAsync] Current RetryCount: {todayExecution.RetryCount}");
+                            Console.WriteLine($"[FailTaskItemAsync] MaxRetryCount: {taskItem.MaxRetryCount}");
+                            Console.WriteLine($"[FailTaskItemAsync] ErrorCount: {todayExecution.ErrorCount}");
+
                             // RetryCount kontrolü: MaxRetryCount'tan fazla retry varsa tekrar çalıştırma
                             if (todayExecution.RetryCount >= taskItem.MaxRetryCount)
                             {
+                                Console.WriteLine($"[FailTaskItemAsync] Max retry limit reached ({taskItem.MaxRetryCount}). Stopping retry mechanism.");
                                 return; // Retry mekanizmasını durdur
                             }
                             
+                            Console.WriteLine($"[FailTaskItemAsync] Scheduling next retry (Wait and set to WaitingRetry)...");
                             await _executionHistoryService.UpdateTaskExecutionStatusAsync(todayExecution.Id, TaskItemStatus.WaitingRetry);
                             
                             // ÖNEMLİ: GroupTaskAssignment'ı da WaitingRetry olarak güncelle
@@ -1553,11 +1561,18 @@ public class TaskManagementService : ITaskManagementService
                             }
 
                             // 2. Durum Belirleme ve Metrik Sayımı
-                            // ÖNEMLİ: assignment.Status veya todayExecution.FinalStatus kullanılabilir
-                            var currentStatus = assignment.Status;
-                            if (todayExecution != null && todayExecution.EndTime != null)
+                            // ÖNEMLİ: Bu execution'a özel durumu kontrol et
+                            TaskItemStatus currentStatus;
+                            if (todayExecution != null)
                             {
+                                // Bu execution'da task çalışmış, durumu execution'dan al
                                 currentStatus = todayExecution.FinalStatus;
+                            }
+                            else
+                            {
+                                // Bu execution'da task henüz çalışmamış = Pending
+                                // Bu durum grubun bitmemiş olduğu anlamına gelir
+                                currentStatus = TaskItemStatus.Pending;
                             }
 
                             if (currentStatus == TaskItemStatus.Completed)
@@ -2030,6 +2045,18 @@ public class TaskManagementService : ITaskManagementService
             return false;
         }
 
+        // ÖNEMLİ: Aynı flowExecutionId ile aktif bir execution varsa tekrar başlatma (duplicate önleme)
+        if (!string.IsNullOrEmpty(flowItemExecutionId))
+        {
+            var existingExecutions = await _executionHistoryService.GetGroupExecutionHistoriesAsync(groupId, flowItemExecutionId);
+            var activeExecution = existingExecutions.FirstOrDefault(e => e.EndTime == null);
+            if (activeExecution != null)
+            {
+                Console.WriteLine($"[StartGroupAsync] Group '{groupId}' already has an active execution ({activeExecution.Id}) in flow execution '{flowItemExecutionId}'. Skipping duplicate start.");
+                return false;
+            }
+        }
+        
         // Group execution history başlat
         var groupExecution = await _executionHistoryService.StartGroupExecutionAsync(groupId, triggeredBy, flowItemId, flowItemExecutionId);
         
@@ -3047,115 +3074,139 @@ public class TaskManagementService : ITaskManagementService
 
     public async Task CheckAndTriggerScheduledFlowsAsync()
     {
-        var activeSchedules = await _dataService.GetActiveFlowSchedulesAsync();
-        var now = DateTime.UtcNow;
-        var nowLocal = DateTime.Now; // Yerel saat için
-
-        Console.WriteLine($"[Flow Timer] Running at {nowLocal}, Active Schedules Count: {activeSchedules.Count}");
-
-        if (activeSchedules.Count == 0)
+        try 
         {
-            return;
-        }
+            var activeSchedules = await _dataService.GetActiveFlowSchedulesAsync();
+            var now = DateTime.UtcNow;
+            var nowLocal = DateTime.Now; // Yerel saat için
 
-        // OPTİMİZASYON: Tüm akış geçmişini tek seferde çek
-        var today = nowLocal.Date;
-        var allFlowHistories = await _executionHistoryService.GetFlowExecutionHistoriesAsync(startDate: today);
-        var flowHistoriesByFlowId = allFlowHistories.GroupBy(h => h.FlowItemId).ToDictionary(g => g.Key, g => g.ToList());
+            Console.WriteLine($"[Flow Timer] Running at {nowLocal}, Active Schedules Count: {activeSchedules.Count}");
 
-        foreach (var schedule in activeSchedules)
-        {
-            bool shouldRun = false;
-            var startTimeToday = nowLocal.Date.Add(schedule.StartTime);
-
-            Console.WriteLine($"[Flow Timer] Checking schedule for Flow: {schedule.FlowItemId}, StartTime: {schedule.StartTime}, LocalNow: {nowLocal.ToShortTimeString()}");
-
-            // Bugün için execution history var mı kontrol et
-            bool hasRunToday = false;
-            FlowExecutionHistory? latestRunToday = null;
-
-            if (flowHistoriesByFlowId.TryGetValue(schedule.FlowItemId, out var histories))
+            if (activeSchedules.Count == 0)
             {
-                latestRunToday = histories.FirstOrDefault(h => h.StartTime.Date == today);
-                hasRunToday = latestRunToday != null;
+                return;
+            }
+
+            // OPTİMİZASYON: Tüm akış geçmişini tek seferde çek
+            var today = nowLocal.Date;
+            List<FlowExecutionHistory> allFlowHistories = new List<FlowExecutionHistory>();
+            try 
+            {
+                allFlowHistories = await _executionHistoryService.GetFlowExecutionHistoriesAsync(startDate: today);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Flow Timer] Error fetching flow histories: {ex.Message}");
             }
             
-            if (hasRunToday)
-            {
-                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} already has a run today at {latestRunToday?.StartTime}");
-            }
+            var flowHistoriesByFlowId = allFlowHistories.GroupBy(h => h.FlowItemId).ToDictionary(g => g.Key, g => g.ToList());
 
-            // Başlangıç saati bugün geçtiyse kontrol et
-            if (nowLocal >= startTimeToday)
+            foreach (var schedule in activeSchedules)
             {
-                if (schedule.LastRunTime == null)
+                try 
                 {
-                    Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has no LastRunTime, should run.");
-                    shouldRun = true;
-                }
-                else
-                {
-                    var lastRunLocal = schedule.LastRunTime.Value.ToLocalTime();
-                    Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} LastRunLocal: {lastRunLocal}, HasRunToday: {hasRunToday}");
+                    bool shouldRun = false;
+                    var startTimeToday = nowLocal.Date.Add(schedule.StartTime);
 
-                    switch (schedule.WorkPeriod)
+                    Console.WriteLine($"[Flow Timer] Checking schedule for Flow: {schedule.FlowItemId}, StartTime: {schedule.StartTime}, LocalNow: {nowLocal.ToShortTimeString()}");
+
+                    // Bugün için execution history var mı kontrol et
+                    bool hasRunToday = false;
+                    FlowExecutionHistory? latestRunToday = null;
+
+                    if (flowHistoriesByFlowId.TryGetValue(schedule.FlowItemId, out var histories))
                     {
-                        case WorkPeriod.Daily:
-                            if (!hasRunToday)
-                            {
-                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has not run today, should run.");
-                                shouldRun = true;
-                            }
-                            else if (lastRunLocal.Date < nowLocal.Date)
-                            {
-                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run was before today, should run.");
-                                shouldRun = true;
-                            }
-                            else if (lastRunLocal.Date == nowLocal.Date && lastRunLocal < startTimeToday)
-                            {
-                                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run today was before scheduled time, should run.");
-                                shouldRun = true;
-                            }
-                            break;
-
-                        case WorkPeriod.Weekly:
-                            var startOfWeek = nowLocal.Date.AddDays(-(int)nowLocal.DayOfWeek);
-                            var lastRunStartOfWeek = lastRunLocal.Date.AddDays(-(int)lastRunLocal.DayOfWeek);
-                            if (lastRunStartOfWeek < startOfWeek) shouldRun = true;
-                            break;
-
-                        case WorkPeriod.Monthly:
-                            if (lastRunLocal.Year < nowLocal.Year || (lastRunLocal.Year == nowLocal.Year && lastRunLocal.Month < nowLocal.Month)) shouldRun = true;
-                            break;
+                        latestRunToday = histories.FirstOrDefault(h => h.StartTime.Date == today);
+                        hasRunToday = latestRunToday != null;
                     }
-                }
-            }
-            else
-            {
-                Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} scheduled time {startTimeToday.ToShortTimeString()} not reached yet.");
-            }
-
-            if (shouldRun)
-            {
-                Console.WriteLine($"[Flow Timer] Triggering Flow: {schedule.FlowItemId}");
-                try
-                {
-                    var startResult = await StartFlowAsync(schedule.FlowItemId, "System");
-                    Console.WriteLine($"[Flow Timer] StartFlowAsync result for {schedule.FlowItemId}: {startResult}");
                     
-                    if (startResult)
+                    if (hasRunToday)
                     {
-                        schedule.LastRunTime = now;
-                        await _dataService.UpdateFlowScheduleAsync(schedule);
-                        Console.WriteLine($"[Flow Timer] Updated LastRunTime for {schedule.FlowItemId} via DataService.");
+                        Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} already has a run today at {latestRunToday?.StartTime}");
+                    }
+
+                    // Başlangıç saati bugün geçtiyse kontrol et
+                    if (nowLocal >= startTimeToday)
+                    {
+                        if (schedule.LastRunTime == null)
+                        {
+                            Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has no LastRunTime, should run.");
+                            shouldRun = true;
+                        }
+                        else
+                        {
+                            var lastRunLocal = schedule.LastRunTime.Value.ToLocalTime();
+                            Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} LastRunLocal: {lastRunLocal}, HasRunToday: {hasRunToday}");
+
+                            switch (schedule.WorkPeriod)
+                            {
+                                case WorkPeriod.Daily:
+                                    if (!hasRunToday)
+                                    {
+                                        Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} has not run today, should run.");
+                                        shouldRun = true;
+                                    }
+                                    else if (lastRunLocal.Date < nowLocal.Date)
+                                    {
+                                        Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run was before today, should run.");
+                                        shouldRun = true;
+                                    }
+                                    else if (lastRunLocal.Date == nowLocal.Date && lastRunLocal < startTimeToday)
+                                    {
+                                        Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} last run today was before scheduled time, should run.");
+                                        shouldRun = true;
+                                    }
+                                    break;
+
+                                case WorkPeriod.Weekly:
+                                    var startOfWeek = nowLocal.Date.AddDays(-(int)nowLocal.DayOfWeek);
+                                    var lastRunStartOfWeek = lastRunLocal.Date.AddDays(-(int)lastRunLocal.DayOfWeek);
+                                    if (lastRunStartOfWeek < startOfWeek) shouldRun = true;
+                                    break;
+
+                                case WorkPeriod.Monthly:
+                                    if (lastRunLocal.Year < nowLocal.Year || (lastRunLocal.Year == nowLocal.Year && lastRunLocal.Month < nowLocal.Month)) shouldRun = true;
+                                    break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[Flow Timer] Flow {schedule.FlowItemId} scheduled time {startTimeToday.ToShortTimeString()} not reached yet.");
+                    }
+
+                    if (shouldRun)
+                    {
+                        Console.WriteLine($"[Flow Timer] Triggering Flow: {schedule.FlowItemId}");
+                        try
+                        {
+                            var startResult = await StartFlowAsync(schedule.FlowItemId, "System");
+                            Console.WriteLine($"[Flow Timer] StartFlowAsync result for {schedule.FlowItemId}: {startResult}");
+                            
+                            if (startResult)
+                            {
+                                schedule.LastRunTime = now;
+                                await _dataService.UpdateFlowScheduleAsync(schedule);
+                                Console.WriteLine($"[Flow Timer] Updated LastRunTime for {schedule.FlowItemId} via DataService.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Flow Timer] CRITICAL ERROR triggering flow {schedule.FlowItemId}: {ex.Message}");
+                            Console.WriteLine(ex.StackTrace);
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Flow Timer] CRITICAL ERROR triggering flow {schedule.FlowItemId}: {ex.Message}");
-                    Console.WriteLine(ex.StackTrace);
+                    Console.WriteLine($"[Flow Timer] Error processing schedule for flow {schedule.FlowItemId}: {ex.Message}");
                 }
             }
+        }
+        catch (Exception ex)
+        {
+             Console.WriteLine($"[Flow Timer] Top level error in CheckAndTriggerScheduledFlowsAsync: {ex.Message}");
+             Console.WriteLine(ex.StackTrace);
         }
     }
 

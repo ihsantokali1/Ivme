@@ -22,6 +22,8 @@ export type TaskItem = {
   endTime?: string;
   lastErrorTime?: string;
   retryDelayMinutes: number;
+  maxRetryCount: number; // Hata durumunda kaç kez tekrar deneneceği
+  timeoutMinutes: number; // Zaman aşımı süresi
   progress: number;
   errorMessage?: string;
   sourceType?: 'Manual' | 'StoredProcedure';

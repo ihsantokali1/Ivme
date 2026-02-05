@@ -17,6 +17,8 @@ export default function TaskItemEditForm({
     name: taskItem.name,
     description: taskItem.description,
     retryIntervalMinutes: taskItem.retryIntervalMinutes,
+    maxRetryCount: taskItem.maxRetryCount || 3, // Varsayılan 3
+    timeoutMinutes: taskItem.timeoutMinutes || 720, // Varsayılan 720 (12 saat)
     storedProcedureDatabase: taskItem.storedProcedureDatabase || '',
     storedProcedureSchema: taskItem.storedProcedureSchema || 'dbo',
   });
@@ -29,6 +31,8 @@ export default function TaskItemEditForm({
         name: formData.name,
         description: formData.description,
         retryIntervalMinutes: formData.retryIntervalMinutes,
+        maxRetryCount: formData.maxRetryCount,
+        timeoutMinutes: formData.timeoutMinutes,
         storedProcedureDatabase: formData.storedProcedureDatabase,
         storedProcedureSchema: formData.storedProcedureSchema,
       });
@@ -57,18 +61,44 @@ export default function TaskItemEditForm({
             placeholder="Açıklama"
             className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px] resize-y"
           />
-          <label className="block">
-            <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Kaç Dakikada Bir Tekrar Çalışması Gerektiği:</span>
-            <input
-              type="number"
-              value={formData.retryIntervalMinutes}
-              onChange={(e) =>
-                setFormData({ ...formData, retryIntervalMinutes: parseInt(e.target.value) || 60 })
-              }
-              min="1"
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </label>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <label className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tekrar Aralığı (Dk):</span>
+              <input
+                type="number"
+                value={formData.retryIntervalMinutes}
+                onChange={(e) =>
+                  setFormData({ ...formData, retryIntervalMinutes: parseInt(e.target.value) || 60 })
+                }
+                min="1"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Max Tekrar:</span>
+              <input
+                type="number"
+                value={formData.maxRetryCount}
+                onChange={(e) =>
+                  setFormData({ ...formData, maxRetryCount: parseInt(e.target.value) || 3 })
+                }
+                min="0"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Zaman Aşımı (Dk):</span>
+              <input
+                type="number"
+                value={formData.timeoutMinutes}
+                onChange={(e) =>
+                  setFormData({ ...formData, timeoutMinutes: parseInt(e.target.value) || 720 })
+                }
+                min="1"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block">
               <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Veritabanı:</span>
