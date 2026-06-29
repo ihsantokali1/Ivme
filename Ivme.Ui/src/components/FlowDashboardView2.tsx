@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import ReactFlow, {
     Background,
     Controls,
@@ -239,6 +239,8 @@ export default function FlowDashboardView2({ flows, groups, onUpdate }: FlowDash
     const [isStarting, setIsStarting] = useState(false);
     const [executionLogs, setExecutionLogs] = useState<string>('');
     const [loadingExecutionLogs, setLoadingExecutionLogs] = useState(false);
+    const [expandedFlowId, setExpandedFlowId] = useState<string | null>(null);
+    const manualExecutionRef = useRef<string | null>(null);
 
     const createDashboardGroupNode = useCallback((props: any) => {
         return <DashboardGroupNode {...props} />;
@@ -293,13 +295,19 @@ export default function FlowDashboardView2({ flows, groups, onUpdate }: FlowDash
 
                 // Load group statuses for selected flow
                 if (selectedFlowId) {
-                    const latestExec = executions
+                    const flowExecs = executions
                         .filter(e => e.flowItemId === selectedFlowId)
-                        .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+                        .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
-                    if (latestExec) {
+                    // Kullanıcı manuel bir execution seçtiyse onu kullan, yoksa en son olanı
+                    const manualExec = manualExecutionRef.current
+                        ? flowExecs.find(e => e.id === manualExecutionRef.current)
+                        : null;
+                    const execToUse = manualExec || flowExecs[0];
+
+                    if (execToUse) {
                         const groupHistories = await executionHistoryApi.getGroupHistories({
-                            flowItemExecutionId: latestExec.id
+                            flowItemExecutionId: execToUse.id
                         });
 
                         const latestPerGroup = new Map<string, GroupExecutionHistory>();
@@ -315,10 +323,10 @@ export default function FlowDashboardView2({ flows, groups, onUpdate }: FlowDash
                         latestPerGroup.forEach((h, groupId) => {
                             const status = calculateGroupStatus(h);
                             statuses[groupId] = status;
-                            statusesWithErrors[groupId] = { status, errorMessage: undefined }; // Error message şimdilik undefined, history'den gelebilir
+                            statusesWithErrors[groupId] = { status, errorMessage: undefined };
                         });
 
-                        setSelectedFlowExecutionId(latestExec.id);
+                        setSelectedFlowExecutionId(execToUse.id);
                         setGroupStatuses(statuses);
                         setGroupStatusesWithErrors(statusesWithErrors);
                     } else {
@@ -658,44 +666,104 @@ export default function FlowDashboardView2({ flows, groups, onUpdate }: FlowDash
                                 }
                             };
 
+                            // Bu akışın bugünkü tüm execution'ları
+                            const flowExecs = flowExecutions
+                                .filter(e => e.flowItemId === flow.id)
+                                .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+                            const isExpanded = expandedFlowId === flow.id;
+
                             return (
-                                <button
-                                    key={flow.id}
-                                    onClick={() => setSelectedFlowId(flow.id)}
-                                    className={`w-full text-left p-3 rounded-lg transition-colors ${getFlowStatusColor(flow.status)}`}
-                                >
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-medium truncate">{flow.name}</span>
-                                        <div className="flex items-center gap-1">
-                                            {flow.status === 'running' && <span className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2" title="Çalışıyor"></span>}
-                                            {flow.status === 'completed' && <span className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full ml-2" title="Tamamlandı"></span>}
-                                            {flow.status === 'failed' && <span className="flex-shrink-0 w-2 h-2 bg-red-500 rounded-full ml-2" title="Başarısız"></span>}
-                                            {flow.status === 'partial' && <span className="flex-shrink-0 w-2 h-2 bg-orange-500 rounded-full ml-2" title="Kısmen Tamamlandı"></span>}
-                                            {flow.status === 'scheduled' && <span className="flex-shrink-0 w-2 h-2 bg-yellow-500 rounded-full ml-2" title="Planlanmış"></span>}
+                                <div key={flow.id} className="space-y-0.5">
+                                    <button
+                                        onClick={() => { setSelectedFlowId(flow.id); manualExecutionRef.current = null; }}
+                                        className={`w-full text-left p-3 rounded-lg transition-colors ${getFlowStatusColor(flow.status)}`}
+                                    >
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="font-medium truncate">{flow.name}</span>
+                                            <div className="flex items-center gap-1">
+                                                {flow.status === 'running' && <span className="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2" title="Çalışıyor"></span>}
+                                                {flow.status === 'completed' && <span className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full ml-2" title="Tamamlandı"></span>}
+                                                {flow.status === 'failed' && <span className="flex-shrink-0 w-2 h-2 bg-red-500 rounded-full ml-2" title="Başarısız"></span>}
+                                                {flow.status === 'partial' && <span className="flex-shrink-0 w-2 h-2 bg-orange-500 rounded-full ml-2" title="Kısmen Tamamlandı"></span>}
+                                                {flow.status === 'scheduled' && <span className="flex-shrink-0 w-2 h-2 bg-yellow-500 rounded-full ml-2" title="Planlanmış"></span>}
+                                            </div>
                                         </div>
-                                    </div>
-                                    {flow.totalGroups > 0 && (
-                                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                                            {flow.completedGroups}/{flow.totalGroups} tamamlandı
-                                            {flow.failedGroups > 0 && `, ${flow.failedGroups} başarısız`}
+                                        {flow.totalGroups > 0 && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                                {flow.completedGroups}/{flow.totalGroups} tamamlandı
+                                                {flow.failedGroups > 0 && `, ${flow.failedGroups} başarısız`}
+                                            </div>
+                                        )}
+                                        {flow.scheduleStartTime && (
+                                            <div className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                                                Planlanan Zaman: {flow.scheduleStartTime.substring(0, 5)}
+                                            </div>
+                                        )}
+                                        {flow.startTime && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                Başlangıç: {new Date(flow.startTime).toLocaleTimeString('tr-TR')}
+                                            </div>
+                                        )}
+                                        {flow.endTime && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                Bitiş: {new Date(flow.endTime).toLocaleTimeString('tr-TR')}
+                                            </div>
+                                        )}
+                                    </button>
+
+                                    {/* Çalışma Geçmişi Toggle */}
+                                    {flowExecs.length > 0 && (
+                                        <button
+                                            onClick={() => setExpandedFlowId(isExpanded ? null : flow.id)}
+                                            className="w-full flex items-center justify-between px-3 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded transition-colors"
+                                        >
+                                            <span>📋 {flowExecs.length} çalışma geçmişi</span>
+                                            <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+                                    )}
+
+                                    {/* Collapsible Execution Listesi */}
+                                    {isExpanded && (
+                                        <div className="ml-2 space-y-0.5 border-l-2 border-gray-200 dark:border-gray-600 pl-2">
+                                            {flowExecs.map(exec => {
+                                                const isSelected = selectedFlowExecutionId === exec.id && selectedFlowId === flow.id;
+                                                const execStatusColor = exec.status === 'Running' ? '#eab308' : exec.status === 'Completed' ? '#059669' : exec.status === 'Failed' ? '#ef4444' : '#9ca3af';
+                                                return (
+                                                    <button
+                                                        key={exec.id}
+                                                        onClick={() => {
+                                                            setSelectedFlowId(flow.id);
+                                                            manualExecutionRef.current = exec.id;
+                                                            setSelectedFlowExecutionId(exec.id);
+                                                        }}
+                                                        className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                                                            isSelected
+                                                                ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-400 dark:ring-blue-500'
+                                                                : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: execStatusColor }} />
+                                                            <span className="text-gray-700 dark:text-gray-300">
+                                                                {new Date(exec.startTime).toLocaleTimeString('tr-TR')}
+                                                            </span>
+                                                            {exec.endTime && (
+                                                                <span className="text-gray-400 dark:text-gray-500">
+                                                                    → {new Date(exec.endTime).toLocaleTimeString('tr-TR')}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="mt-0.5 text-gray-500 dark:text-gray-400">
+                                                            {statusLabels[exec.status] || exec.status}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     )}
-                                    {flow.scheduleStartTime && (
-                                        <div className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
-                                            Planlanan Zaman: {flow.scheduleStartTime.substring(0, 5)}
-                                        </div>
-                                    )}
-                                    {flow.startTime && (
-                                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                                            Başlangıç: {new Date(flow.startTime).toLocaleTimeString('tr-TR')}
-                                        </div>
-                                    )}
-                                    {flow.endTime && (
-                                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                                            Bitiş: {new Date(flow.endTime).toLocaleTimeString('tr-TR')}
-                                        </div>
-                                    )}
-                                </button>
+                                </div>
                             );
                         })}
                     </div>

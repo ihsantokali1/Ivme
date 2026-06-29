@@ -8,7 +8,7 @@ import { sortAllTasksByPrerequisites } from '../utils/taskSorting';
 import 'reactflow/dist/style.css';
 
 export default function ManagementPage() {
-  const [activeTab, setActiveTab] = useState<'groups' | 'flows' | 'flows2'>('groups');
+  const [activeTab, setActiveTab] = useState<'groups' | 'flows'>('groups');
 
   // Groups tab data
   const [groups, setGroups] = useState<TaskGroup[]>([]);
@@ -114,15 +114,6 @@ export default function ManagementPage() {
           >
             Akış İzleme
           </button>
-          <button
-            onClick={() => setActiveTab('flows2')}
-            className={`px-6 py-3 font-medium transition-colors ${activeTab === 'flows2'
-              ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-              }`}
-          >
-            Akış İzleme2
-          </button>
         </div>
       </div>
 
@@ -135,12 +126,6 @@ export default function ManagementPage() {
           todayStatusesWithErrors={todayStatusesWithErrors}
           onUpdate={loadData}
           groups={groups}
-        />
-      ) : activeTab === 'flows' ? (
-        <FlowDashboardView
-          flows={flows}
-          groups={groups}
-          onUpdate={loadData}
         />
       ) : (
         <FlowDashboardView2

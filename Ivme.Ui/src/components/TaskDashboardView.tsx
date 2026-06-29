@@ -14,7 +14,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import type { TaskItem, GroupTaskAssignment, GroupExecutionHistory, GroupSchedule, TaskExecutionHistory } from '../services/api';
 import { calculateTaskLevels } from '../utils/taskSorting';
-import { executionHistoryApi, groupSchedulesApi, taskGroupsApi, taskItemsApi } from '../services/api';
+import { executionHistoryApi, groupSchedulesApi, taskGroupsApi, taskItemsApi, flowItemsApi } from '../services/api';
 import ProtectedButton from './ProtectedButton';
 
 // Task durumuna göre renk belirleme
@@ -386,6 +386,12 @@ export default function TaskDashboardView({
   const [isStarting, setIsStarting] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<string>('');
   const [loadingExecutionLogs, setLoadingExecutionLogs] = useState(false);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [selectedGroupExecutionId, setSelectedGroupExecutionId] = useState<string | null>(null);
+  const manualGroupExecutionRef = useRef<string | null>(null);
+  const [flowItems, setFlowItems] = useState<Array<{ id: string; name: string }>>([]);
+  const [localTodayStatuses, setLocalTodayStatuses] = useState<Record<string, string> | null>(null);
+  const [localTodayStatusesWithErrors, setLocalTodayStatusesWithErrors] = useState<Record<string, { status: string; errorMessage?: string }> | null>(null);
 
   // nodeTypes'i memoize et (React Flow uyarısını önlemek için)
   // groupExecutions prop'unu DashboardTaskNode'a geçirmek için
@@ -417,16 +423,18 @@ export default function TaskDashboardView({
         todayEnd.setDate(todayEnd.getDate() + 1);
 
         // Tüm grupları ve schedule'ları yükle
-        const [executions, groupsData] = await Promise.all([
+        const [executions, groupsData, flowsData] = await Promise.all([
           executionHistoryApi.getGroupHistories({
             startDate: todayStart.toISOString(),
             endDate: todayEnd.toISOString(),
           }),
           taskGroupsApi.getAll(),
+          flowItemsApi.getAll().catch(() => []),
         ]);
 
         setGroupExecutions(executions);
         setAllGroups(groupsData);
+        setFlowItems(flowsData);
 
         // Her grup için schedule'ı kontrol et
         const schedulePromises = groupsData.map(async (group) => {
@@ -488,6 +496,39 @@ export default function TaskDashboardView({
     return () => clearInterval(interval);
   }, [selectedGroupId]);
 
+  // Manuel execution seçimi yapıldığında, o execution'a ait statüleri yükle
+  useEffect(() => {
+    const loadFilteredStatuses = async () => {
+      const execIdToUse = manualGroupExecutionRef.current || selectedGroupExecutionId;
+      if (!execIdToUse || !selectedGroupId) {
+        setLocalTodayStatuses(null);
+        setLocalTodayStatusesWithErrors(null);
+        return;
+      }
+
+      try {
+        const [statuses, statusesWithErrors] = await Promise.all([
+          executionHistoryApi.getTodayStatuses({ groupExecutionId: execIdToUse }),
+          executionHistoryApi.getTodayStatusesWithErrors({ groupExecutionId: execIdToUse }),
+        ]);
+        setLocalTodayStatuses(statuses);
+        setLocalTodayStatusesWithErrors(statusesWithErrors);
+      } catch {
+        setLocalTodayStatuses(null);
+        setLocalTodayStatusesWithErrors(null);
+      }
+    };
+
+    if (manualGroupExecutionRef.current) {
+      loadFilteredStatuses();
+      const interval = setInterval(loadFilteredStatuses, 2000);
+      return () => clearInterval(interval);
+    } else {
+      setLocalTodayStatuses(null);
+      setLocalTodayStatusesWithErrors(null);
+    }
+  }, [selectedGroupExecutionId, selectedGroupId]);
+
   const handleStartGroup = async () => {
     if (!selectedGroupId) return;
 
@@ -516,6 +557,10 @@ export default function TaskDashboardView({
       setIsStarting(false);
     }
   };
+
+  // Etkili statü kaynağını belirle (manuel seçim varsa local, yoksa prop)
+  const effectiveTodayStatuses = localTodayStatuses || todayStatuses;
+  const effectiveTodayStatusesWithErrors = localTodayStatusesWithErrors || todayStatusesWithErrors;
 
   // Her grup için ayrı flow oluştur
   const flowsByGroup = useMemo(() => {
@@ -593,8 +638,8 @@ export default function TaskDashboardView({
 
           const level = taskLevels.get(task.id) || 0;
           const statusKey = `${assignment.groupId}-${assignment.taskItemId}`;
-          const status = todayStatuses[statusKey];
-          const statusWithError = todayStatusesWithErrors[statusKey];
+          const status = effectiveTodayStatuses[statusKey];
+          const statusWithError = effectiveTodayStatusesWithErrors[statusKey];
           const progress = assignment.progress ?? 0;
 
           const nodesInLevel = levelAssignments.length;
@@ -745,8 +790,8 @@ export default function TaskDashboardView({
 
           const level = taskLevels.get(task.id) || 0;
           const statusKey = `${assignment.groupId}-${assignment.taskItemId}`;
-          const status = todayStatuses[statusKey];
-          const statusWithError = todayStatusesWithErrors[statusKey];
+          const status = effectiveTodayStatuses[statusKey];
+          const statusWithError = effectiveTodayStatusesWithErrors[statusKey];
           const progress = assignment.progress ?? 0;
 
           const nodesInLevel = levelAssignments.length;
@@ -799,7 +844,7 @@ export default function TaskDashboardView({
           const prereqAssignment = groupAssignments.find(a => a.taskItemId === prereqId);
           if (prereqAssignment) {
             const prereqStatusKey = `${prereqAssignment.groupId}-${prereqAssignment.taskItemId}`;
-            const prereqStatus = todayStatuses[prereqStatusKey];
+            const prereqStatus = effectiveTodayStatuses[prereqStatusKey];
 
             groupEdges.push({
               id: `e-${prereqAssignment.id}-${assignment.id}`,
@@ -828,7 +873,7 @@ export default function TaskDashboardView({
     });
 
     return flows;
-  }, [tasks, assignments, groups, todayStatuses, todayStatusesWithErrors, groupExecutions, onUpdate]);
+  }, [tasks, assignments, groups, effectiveTodayStatuses, effectiveTodayStatusesWithErrors, groupExecutions, onUpdate]);
 
   // Seçilen grup için flow'u bul
   const selectedFlow = useMemo(() => {
@@ -959,7 +1004,7 @@ export default function TaskDashboardView({
 
       groupAssignments.forEach(assignment => {
         const statusKey = `${groupId}-${assignment.taskItemId}`;
-        const status = todayStatuses[statusKey];
+        const status = effectiveTodayStatuses[statusKey];
 
         if (status === 'Completed') {
           realCompletedTasks++;
@@ -1012,9 +1057,13 @@ export default function TaskDashboardView({
         failedTasks: realFailedTasks,
         totalTasks: realTotalTasks,
         groupExecutionId: latestExecution?.id,
+        // Bu gruptaki tüm bugünkü execution'lar
+        allExecutions: groupExecutions
+          .filter(exec => exec.groupId === groupId)
+          .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
       };
     });
-  }, [activeGroupIds, allGroups, groups, groupExecutions, schedules, assignments, todayStatuses]);
+  }, [activeGroupIds, allGroups, groups, groupExecutions, schedules, assignments, effectiveTodayStatuses, flowItems]);
 
   if (activeGroupsWithNames.length === 0) {
     return (
@@ -1073,9 +1122,9 @@ export default function TaskDashboardView({
               };
 
               return (
+                <div key={group.id} className="space-y-0.5">
                 <button
-                  key={group.id}
-                  onClick={() => setSelectedGroupId(group.id)}
+                  onClick={() => { setSelectedGroupId(group.id); manualGroupExecutionRef.current = null; setLocalTodayStatuses(null); setLocalTodayStatusesWithErrors(null); }}
                   className={`w-full text-left p-3 rounded-lg transition-colors ${getStatusColor(group.status)}`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -1125,6 +1174,67 @@ export default function TaskDashboardView({
                     </div>
                   )}
                 </button>
+
+                {/* Çalışma Geçmişi Toggle */}
+                {group.allExecutions && group.allExecutions.length > 0 && (
+                  <button
+                    onClick={() => setExpandedGroupId(expandedGroupId === group.id ? null : group.id)}
+                    className="w-full flex items-center justify-between px-3 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded transition-colors"
+                  >
+                    <span>📋 {group.allExecutions.length} çalışma geçmişi</span>
+                    <svg className={`w-3 h-3 transition-transform ${expandedGroupId === group.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Collapsible Execution Listesi */}
+                {expandedGroupId === group.id && group.allExecutions && (
+                  <div className="ml-2 space-y-0.5 border-l-2 border-gray-200 dark:border-gray-600 pl-2">
+                    {group.allExecutions.map((exec: any) => {
+                      const isSelected = (manualGroupExecutionRef.current === exec.id) || (!manualGroupExecutionRef.current && selectedGroupExecutionId === exec.id);
+                      const execStatus = exec.status || (exec.endTime ? (exec.failedTasks > 0 ? 'Failed' : 'Completed') : 'Running');
+                      const execStatusColor = execStatus === 'Running' ? '#eab308' : execStatus === 'Completed' ? '#059669' : execStatus === 'Failed' ? '#ef4444' : '#9ca3af';
+                      const flowName = exec.flowItemId ? flowItems.find((f: any) => f.id === exec.flowItemId)?.name : null;
+                      return (
+                        <button
+                          key={exec.id}
+                          onClick={() => {
+                            setSelectedGroupId(group.id);
+                            manualGroupExecutionRef.current = exec.id;
+                            setSelectedGroupExecutionId(exec.id);
+                          }}
+                          className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-400 dark:ring-blue-500'
+                              : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: execStatusColor }} />
+                            <span className="text-gray-700 dark:text-gray-300">
+                              {new Date(exec.startTime).toLocaleTimeString('tr-TR')}
+                            </span>
+                            {exec.endTime && (
+                              <span className="text-gray-400 dark:text-gray-500">
+                                → {new Date(exec.endTime).toLocaleTimeString('tr-TR')}
+                              </span>
+                            )}
+                          </div>
+                          {flowName && (
+                            <div className="mt-0.5 text-blue-600 dark:text-blue-400 font-medium">
+                              🔗 {flowName}
+                            </div>
+                          )}
+                          <div className="mt-0.5 text-gray-500 dark:text-gray-400">
+                            {statusLabels[execStatus] || execStatus}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               );
             })}
           </div>

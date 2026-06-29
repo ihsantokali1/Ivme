@@ -1,4 +1,4 @@
-﻿using Ivme.Api.Models;
+using Ivme.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Linq;
 using Microsoft.Data.SqlClient;
@@ -3292,9 +3292,11 @@ public class TaskManagementService : ITaskManagementService
         using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
         await connection.OpenAsync();
 
-        // SP adını oluştur
+        // SP adını oluştur - Farklı veritabanı desteği için 3 parçalı isimlendirme (Database.Schema.SP)
         var schema = taskItem.StoredProcedureSchema ?? "dbo";
-        var spName = $"[{schema}].[{taskItem.StoredProcedureName}]";
+        var spName = string.IsNullOrEmpty(taskItem.StoredProcedureDatabase) 
+            ? $"[{schema}].[{taskItem.StoredProcedureName}]"
+            : $"[{taskItem.StoredProcedureDatabase}].[{schema}].[{taskItem.StoredProcedureName}]";
 
         // SQL fonksiyonu içeren parametreler var mı kontrol et
         bool hasSqlFunctions = false;

@@ -1,12 +1,13 @@
-import { ReactNode, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import type { ReactNode, MouseEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { canPerformAction, canViewPage, hasPermission, getRolePermissions, getCacheVersion } from '../utils/permissions';
-import type { Permission, UserRole } from '../utils/permissions';
+import { canPerformAction, hasPermission, getRolePermissions, getCacheVersion } from '../utils/permissions';
+import type { Permission } from '../utils/permissions';
 
 interface ProtectedButtonProps {
   permission: Permission | string;
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
   disabled?: boolean;
   className?: string;
   title?: string;
